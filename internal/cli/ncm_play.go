@@ -13,8 +13,6 @@ import (
 	"github.com/steipete/sonoscli/internal/sonos"
 )
 
-const defaultArtistQueueSize = 8
-
 func init() {
 	rand.Seed(time.Now().UnixNano())
 }
@@ -69,7 +67,8 @@ func newNCMPlayCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			queued, err := rebuildNCMQueue(ctx, qc, dedupeNCMTracks(items), index-1)
+			queuedItems := dedupeNCMTracks(items)
+			queued, err := rebuildNCMQueueNative(ctx, qc, queuedItems, index-1)
 			if err != nil {
 				return err
 			}
@@ -83,7 +82,7 @@ func newNCMPlayCmd(flags *rootFlags) *cobra.Command {
 					"selected":     selected,
 					"uri":          playURI,
 					"playableHits": len(items),
-					"queued":       queued,
+					"queuedTracks": len(queued),
 				})
 			}
 			writePlainLine(cmd, flags, fmt.Sprintf("已播放：%s", selected.Title))
@@ -123,16 +122,18 @@ func newNCMLuckyCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			items := dedupeNCMTracks(onlyNCMTracks(toLikeItemsFromMetadata(res.MediaMetadata)))
+			items := onlyNCMTracks(toLikeItemsFromMetadata(res.MediaMetadata))
 			if len(items) == 0 {
 				return errors.New("no playable tracks")
 			}
-			selected := items[rand.Intn(len(items))]
-			qc, err := coordinatorClient(ctx, flags)
+			selectedIndex := rand.Intn(len(items))
+			selected := items[selectedIndex]
+			queuedItems := dedupeNCMTracks(items)
+			c, err := coordinatorClient(ctx, flags)
 			if err != nil {
 				return err
 			}
-			queued, err := rebuildNCMQueue(ctx, qc, items, findTrackIndex(items, selected.ID))
+			queued, err := rebuildNCMQueueNative(ctx, c, queuedItems, selectedIndex)
 			if err != nil {
 				return err
 			}
@@ -145,7 +146,7 @@ func newNCMLuckyCmd(flags *rootFlags) *cobra.Command {
 					"selected":     selected,
 					"uri":          playURI,
 					"playableHits": len(items),
-					"queued":       queued,
+					"queuedTracks": len(queued),
 				})
 			}
 			writePlainLine(cmd, flags, fmt.Sprintf("已随机播放：%s", selected.Title))
@@ -157,16 +158,33 @@ func newNCMLuckyCmd(flags *rootFlags) *cobra.Command {
 }
 
 type smapiLikeItem struct {
-	ID       string `json:"id"`
-	ItemType string `json:"itemType"`
-	Title    string `json:"title"`
-	Summary  string `json:"summary,omitempty"`
+	ID            string `json:"id"`
+	ItemType      string `json:"itemType"`
+	Title         string `json:"title"`
+	Summary       string `json:"summary,omitempty"`
+	Artist        string `json:"artist,omitempty"`
+	Album         string `json:"album,omitempty"`
+	AlbumArtURI   string `json:"albumArtURI,omitempty"`
+	DurationSec   int    `json:"durationSec,omitempty"`
+	CanPlay       bool   `json:"canPlay,omitempty"`
+	CanSkip       bool   `json:"canSkip,omitempty"`
 }
 
 func toLikeItemsFromMetadata(items []sonos.SMAPIItem) []smapiLikeItem {
 	out := make([]smapiLikeItem, 0, len(items))
 	for _, it := range items {
-		out = append(out, smapiLikeItem{ID: it.ID, ItemType: it.ItemType, Title: it.Title, Summary: it.Summary})
+		out = append(out, smapiLikeItem{
+			ID:          it.ID,
+			ItemType:    it.ItemType,
+			Title:       it.Title,
+			Summary:     it.Summary,
+			Artist:      it.TrackMetadata.Artist,
+			Album:       it.TrackMetadata.Album,
+			AlbumArtURI: it.TrackMetadata.AlbumArtURI,
+			DurationSec: it.TrackMetadata.DurationSec,
+			CanPlay:     it.TrackMetadata.CanPlay,
+			CanSkip:     it.TrackMetadata.CanSkip,
+		})
 	}
 	return out
 }
@@ -174,7 +192,18 @@ func toLikeItemsFromMetadata(items []sonos.SMAPIItem) []smapiLikeItem {
 func toLikeItemsFromCollections(items []sonos.SMAPIItem) []smapiLikeItem {
 	out := make([]smapiLikeItem, 0, len(items))
 	for _, it := range items {
-		out = append(out, smapiLikeItem{ID: it.ID, ItemType: it.ItemType, Title: it.Title, Summary: it.Summary})
+		out = append(out, smapiLikeItem{
+			ID:          it.ID,
+			ItemType:    it.ItemType,
+			Title:       it.Title,
+			Summary:     it.Summary,
+			Artist:      it.TrackMetadata.Artist,
+			Album:       it.TrackMetadata.Album,
+			AlbumArtURI: it.TrackMetadata.AlbumArtURI,
+			DurationSec: it.TrackMetadata.DurationSec,
+			CanPlay:     it.TrackMetadata.CanPlay,
+			CanSkip:     it.TrackMetadata.CanSkip,
+		})
 	}
 	return out
 }
@@ -190,69 +219,110 @@ func onlyNCMTracks(items []smapiLikeItem) []smapiLikeItem {
 	return out
 }
 
+func buildNCMTrackURI(id string) string {
+	id = strings.TrimSpace(id)
+	return "x-sonos-http:" + url.QueryEscape(id) + ".mp3?sid=165&flags=8232&sn=5"
+}
+
 func dedupeNCMTracks(items []smapiLikeItem) []smapiLikeItem {
-	seen := map[string]struct{}{}
+	seen := make(map[string]struct{}, len(items))
 	out := make([]smapiLikeItem, 0, len(items))
 	for _, it := range items {
 		id := strings.TrimSpace(it.ID)
-		title := strings.TrimSpace(strings.ToLower(it.Title))
-		key := id + "|" + title
 		if id == "" {
 			continue
 		}
+		key := strings.ToUpper(id)
 		if _, ok := seen[key]; ok {
 			continue
 		}
 		seen[key] = struct{}{}
 		out = append(out, it)
-		if len(out) >= defaultArtistQueueSize {
-			break
-		}
 	}
 	return out
 }
 
-func findTrackIndex(items []smapiLikeItem, id string) int {
-	id = strings.TrimSpace(id)
-	for i, it := range items {
-		if strings.TrimSpace(it.ID) == id {
-			return i
-		}
-	}
-	return 0
-}
-
-func rebuildNCMQueue(ctx context.Context, c *sonos.Client, items []smapiLikeItem, startIndex int) ([]smapiLikeItem, error) {
+func rebuildNCMQueueNative(ctx context.Context, c *sonos.Client, items []smapiLikeItem, selectedIndex int) ([]int, error) {
 	if len(items) == 0 {
-		return nil, errors.New("no tracks to queue")
+		return nil, errors.New("no queueable tracks")
 	}
-	if startIndex < 0 || startIndex >= len(items) {
-		startIndex = 0
-	}
-	ordered := make([]smapiLikeItem, 0, len(items))
-	ordered = append(ordered, items[startIndex:]...)
-	ordered = append(ordered, items[:startIndex]...)
-	if len(ordered) > defaultArtistQueueSize {
-		ordered = ordered[:defaultArtistQueueSize]
+	if selectedIndex < 0 || selectedIndex >= len(items) {
+		return nil, fmt.Errorf("selected index %d out of range for %d tracks", selectedIndex, len(items))
 	}
 	if err := c.ClearQueue(ctx); err != nil {
 		return nil, err
 	}
-	for i, it := range ordered {
-		if _, err := c.AddURIToQueue(ctx, buildNCMTrackURI(it.ID), "", i+1, false); err != nil {
-			return ordered[:i], err
+
+	queued := make([]int, 0, len(items))
+	for _, it := range items {
+		uri := buildNCMTrackURI(it.ID)
+		meta := buildNCMQueueTrackMeta(it)
+		pos, err := c.AddURIToQueue(ctx, uri, meta, 0, false)
+		if err != nil {
+			return queued, fmt.Errorf("enqueue %q failed: %w", it.Title, err)
 		}
+		queued = append(queued, pos)
 	}
-	if err := c.PlayQueuePosition(ctx, 1); err != nil {
-		return ordered, err
+
+	playPos := queued[selectedIndex]
+	if playPos <= 0 {
+		playPos = selectedIndex + 1
 	}
-	_ = c.SetPlayMode(ctx, sonos.PlayModeShuffle)
-	return ordered, nil
+	if err := c.PlayQueuePosition(ctx, playPos); err != nil {
+		return queued, err
+	}
+	return queued, nil
 }
 
-func buildNCMTrackURI(id string) string {
-	id = strings.TrimSpace(id)
-	return "x-sonos-http:" + url.QueryEscape(id) + ".mp3?sid=165&flags=8232&sn=5"
+func buildNCMQueueTrackMeta(it smapiLikeItem) string {
+	rawTitle := strings.TrimSpace(it.Title)
+	if rawTitle == "" {
+		rawTitle = strings.TrimSpace(it.ID)
+	}
+	artist := strings.TrimSpace(it.Artist)
+	album := strings.TrimSpace(it.Album)
+	uri := buildNCMTrackURI(it.ID)
+	encodedURI := strings.ToLower(url.QueryEscape(uri))
+	displayTitle := compactQueueField(rawTitle)
+	displayArtist := compactQueueField(artist)
+	displayAlbum := compactQueueField(album)
+	itemID := "SQ:0/" + encodedURI + ":A" + displayTitle + "," + displayArtist + "," + displayAlbum + ",0000000197,0"
+	return `<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/" xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"><item id="` + xmlEscapeText(itemID) + `" parentID="SQ:0" restricted="true"><dc:title>` + xmlEscapeText(displayTitle) + `</dc:title><upnp:class>object.item.audioItem.musicTrack</upnp:class><desc id="cdudn" nameSpace="urn:schemas-rinconnetworks-com:metadata-1-0/">RINCON_AssociatedZPUDN</desc></item></DIDL-Lite>`
+}
+
+func xmlEscapeText(s string) string {
+	repl := strings.NewReplacer(
+		"&", "&amp;",
+		"<", "&lt;",
+		">", "&gt;",
+		`"`, "&quot;",
+		"'", "&apos;",
+	)
+	return repl.Replace(s)
+}
+
+func compactQueueField(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "-"
+	}
+	s = strings.Map(func(r rune) rune {
+		switch r {
+		case ',', '/', '\n', '\r', '\t', ':', ';', '+', '&', '(', ')', '[', ']', '{', '}', '#', '"', '\'', '\\', '|':
+			return ' '
+		default:
+			return r
+		}
+	}, s)
+	s = strings.Join(strings.Fields(s), " ")
+	if s == "" {
+		return "-"
+	}
+	if len([]rune(s)) > 32 {
+		r := []rune(s)
+		s = string(r[:32])
+	}
+	return s
 }
 
 func normalizeNCMQuery(query string) string {

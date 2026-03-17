@@ -15,6 +15,8 @@ func newNCMCmd(flags *rootFlags) *cobra.Command {
 	cmd.AddCommand(newNCMCategoriesCmd(flags))
 	cmd.AddCommand(newNCMBrowseCmd(flags))
 	cmd.AddCommand(newNCMSearchCmd(flags))
+	cmd.AddCommand(newNCMPlayCmd(flags))
+	cmd.AddCommand(newNCMLuckyCmd(flags))
 	cmd.AddCommand(newNCMAuthCmd(flags))
 	return cmd
 }

@@ -21,7 +21,7 @@
 - **Scriptable output**: `--format plain|json|tsv` plus `--debug` tracing.
 - **sonoscli-plus extras**:
   - `mode get|shuffle|shuffle-norepeat|repeat|repeat-one|normal`
-  - `ncm categories|browse|search|auth ...` for 网易云音乐 via Sonos SMAPI
+  - `ncm categories|browse|search|play|lucky|auth ...` for 网易云音乐 via Sonos SMAPI
 
 This is not an official Sonos project.
 

@@ -199,3 +199,40 @@ func (c *Client) GetTransportInfo(ctx context.Context) (TransportInfo, error) {
 		Speed:  resp["CurrentSpeed"],
 	}, nil
 }
+
+// PlayMode represents the playback mode (shuffle/repeat settings).
+type PlayMode string
+
+const (
+	PlayModeNormal          PlayMode = "NORMAL"
+	PlayModeShuffle         PlayMode = "SHUFFLE"
+	PlayModeShuffleNoRepeat PlayMode = "SHUFFLE_NOREPEAT"
+	PlayModeRepeatAll       PlayMode = "REPEAT_ALL"
+	PlayModeRepeatOne       PlayMode = "REPEAT_ONE"
+)
+
+type TransportSettings struct {
+	PlayMode       PlayMode
+	RecQualityMode string
+}
+
+func (c *Client) GetTransportSettings(ctx context.Context) (TransportSettings, error) {
+	resp, err := c.soapCall(ctx, controlAVTransport, urnAVTransport, "GetTransportSettings", map[string]string{
+		"InstanceID": "0",
+	})
+	if err != nil {
+		return TransportSettings{}, err
+	}
+	return TransportSettings{
+		PlayMode:       PlayMode(resp["PlayMode"]),
+		RecQualityMode: resp["RecQualityMode"],
+	}, nil
+}
+
+func (c *Client) SetPlayMode(ctx context.Context, mode PlayMode) error {
+	_, err := c.soapCall(ctx, controlAVTransport, urnAVTransport, "SetPlayMode", map[string]string{
+		"InstanceID":  "0",
+		"NewPlayMode": string(mode),
+	})
+	return err
+}

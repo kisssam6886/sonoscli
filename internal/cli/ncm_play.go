@@ -31,7 +31,7 @@ func newNCMPlayCmd(flags *rootFlags) *cobra.Command {
 			if err := validateTarget(flags); err != nil {
 				return err
 			}
-			query := strings.TrimSpace(strings.Join(args, " "))
+			query := normalizeNCMQuery(strings.TrimSpace(strings.Join(args, " ")))
 			if query == "" {
 				return errors.New("query is required")
 			}
@@ -105,7 +105,7 @@ func newNCMLuckyCmd(flags *rootFlags) *cobra.Command {
 			if err := validateTarget(flags); err != nil {
 				return err
 			}
-			query := strings.TrimSpace(strings.Join(args, " "))
+			query := normalizeNCMQuery(strings.TrimSpace(strings.Join(args, " ")))
 			if query == "" {
 				return errors.New("query is required")
 			}
@@ -192,4 +192,31 @@ func onlyNCMTracks(items []smapiLikeItem) []smapiLikeItem {
 func buildNCMTrackURI(id string) string {
 	id = strings.TrimSpace(id)
 	return "x-sonos-http:" + url.QueryEscape(id) + ".mp3?sid=165&flags=8232&sn=5"
+}
+
+func normalizeNCMQuery(query string) string {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return query
+	}
+	aliases := map[string]string{
+		"sammi":    "郑秀文",
+		"eason":    "陈奕迅",
+		"jay":      "周杰伦",
+		"gem":      "邓紫棋",
+		"g.e.m.":   "邓紫棋",
+		"gem邓紫棋":   "邓紫棋",
+		"joey":     "容祖儿",
+		"hins":     "张敬轩",
+		"jj":       "林俊杰",
+		"andy lau": "刘德华",
+		"leehom":   "王力宏",
+		"kay":      "谢安琪",
+		"hacken":   "许志安",
+	}
+	lower := strings.ToLower(query)
+	if v, ok := aliases[lower]; ok {
+		return v
+	}
+	return query
 }

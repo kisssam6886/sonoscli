@@ -22,6 +22,7 @@
 - **sonoscli-plus extras**:
   - `mode get|shuffle|shuffle-norepeat|repeat|repeat-one|normal`
   - `ncm categories|browse|search|play|lucky|auth ...` for 网易云音乐 via Sonos SMAPI
+  - built-in alias normalization for common names like `Sammi`/`Eason`/`Jay`/`GEM`
 
 This is not an official Sonos project.
 

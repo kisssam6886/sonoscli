@@ -2,6 +2,8 @@
 
 `sonoscli-plus` is Sam 本地维护的 Sonos CLI 增强版 fork，基于 `sonoscli` 扩展。
 
+项目方向：把它逐步做成一个 **Sonos × 网易云音乐的稳定能力层 / control layer**，方便任何 agent（OpenClaw、Telegram bot、Discord bot、Web agent 等）通过标准参数和 JSON 输出来调用，而不需要理解 Sonos/SMAPI 底层细节。
+
 当前额外保留的播放模式命令：`mode get` / `mode shuffle` / `mode shuffle-norepeat` / `mode repeat` / `mode repeat-one` / `mode normal`。
 
 ## Features
@@ -455,3 +457,4 @@ See [`docs/spec.md`](docs/spec.md).
 ## License
 
 MIT License. See [`LICENSE`](LICENSE).
+ICENSE).

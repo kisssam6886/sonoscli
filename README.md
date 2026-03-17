@@ -19,6 +19,9 @@
   - Optional Spotify Web API search (client credentials) if you want it.
 - **Live events**: `watch` subscribes to AVTransport + RenderingControl and prints changes.
 - **Scriptable output**: `--format plain|json|tsv` plus `--debug` tracing.
+- **sonoscli-plus extras**:
+  - `mode get|shuffle|shuffle-norepeat|repeat|repeat-one|normal`
+  - `ncm categories|browse|search|auth ...` for 网易云音乐 via Sonos SMAPI
 
 This is not an official Sonos project.
 

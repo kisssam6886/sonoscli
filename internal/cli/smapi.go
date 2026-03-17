@@ -296,6 +296,12 @@ func newSMAPIAuthCompleteCmd(flags *rootFlags) *cobra.Command {
 			pair, err := completeSMAPIAuth(ctx, wait, func(ctx context.Context) (sonos.SMAPITokenPair, error) {
 				attempts++
 				pair, err := sm.CompleteAuthentication(ctx, linkCode, linkDeviceID)
+				if err != nil && isSMAPIEmptyTokenPair(err) {
+					fallbackPair, fallbackErr := tolerateSMAPIEmptyTokenPair(ctx, store, sm)
+					if fallbackErr == nil {
+						return fallbackPair, nil
+					}
+				}
 				if wait > 0 && !isJSON(flags) && isSMAPILinkPending(err) {
 					if !printedWaitHint {
 						_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Waiting for linking to complete...")
@@ -410,6 +416,39 @@ func isSMAPIInvalidLinkCode(err error) bool {
 	}
 	msg := err.Error()
 	return strings.Contains(strings.ToLower(msg), "invalid linkcode")
+}
+
+func isSMAPIEmptyTokenPair(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "empty token pair")
+}
+
+func tolerateSMAPIEmptyTokenPair(ctx context.Context, store sonos.SMAPITokenStore, sm *sonos.SMAPIClient) (sonos.SMAPITokenPair, error) {
+	if store != nil {
+		if pair, ok, err := store.Load(sm.Service.ID, sm.HouseholdID); err == nil && ok {
+			if pair.UpdatedAt.IsZero() {
+				pair.UpdatedAt = time.Now().UTC()
+			}
+			return pair, nil
+		}
+	}
+
+	cats, err := sm.SearchCategories(ctx)
+	if err != nil || len(cats) == 0 {
+		if err != nil {
+			return sonos.SMAPITokenPair{}, err
+		}
+		return sonos.SMAPITokenPair{}, errors.New("empty token pair in response")
+	}
+
+	return sonos.SMAPITokenPair{
+		UpdatedAt:   time.Now().UTC(),
+		LinkCode:    "session-linked",
+		DeviceID:    sm.DeviceID,
+		HouseholdID: sm.HouseholdID,
+	}, nil
 }
 
 func newSMAPISearchCmd(flags *rootFlags) *cobra.Command {

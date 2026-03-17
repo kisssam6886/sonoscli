@@ -88,3 +88,80 @@ func TestFavoriteURIFromResMD(t *testing.T) {
 		t.Fatalf("favoriteURI: %q", got)
 	}
 }
+
+func TestSafeURIDecode(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "double-encoded colons lowercase",
+			in:   "x-sonos-http:SONG%253a12345%253a.mp3",
+			want: "x-sonos-http:SONG%3a12345%3a.mp3",
+		},
+		{
+			name: "double-encoded colons uppercase",
+			in:   "x-sonos-http:SONG%253A12345%253A.mp3",
+			want: "x-sonos-http:SONG%3A12345%3A.mp3",
+		},
+		{
+			name: "mixed-case double-encoded",
+			in:   "x-sonos-http:SONG%253aABCD%253Amp3%253A.mp3?sid=165&flags=8232&sn=5",
+			want: "x-sonos-http:SONG%3aABCD%3Amp3%3A.mp3?sid=165&flags=8232&sn=5",
+		},
+		{
+			name: "single-encoded colons unchanged",
+			in:   "x-sonos-http:SONG%3a12345%3a.mp3",
+			want: "x-sonos-http:SONG%3a12345%3a.mp3",
+		},
+		{
+			name: "plain URI unchanged",
+			in:   "spotify:track:abc",
+			want: "spotify:track:abc",
+		},
+		{
+			name: "empty string",
+			in:   "",
+			want: "",
+		},
+		{
+			name: "real-world QQ Music double-encoded",
+			in:   "x-sonos-http:SONG%2500787C5E97EABD9EC8D333672027A506%253amp3%253a.mp3?sid=165&flags=8232&sn=5",
+			want: "x-sonos-http:SONG%00787C5E97EABD9EC8D333672027A506%3amp3%3a.mp3?sid=165&flags=8232&sn=5",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := safeURIDecode(tc.in)
+			if got != tc.want {
+				t.Errorf("safeURIDecode(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFavoriteURIDoubleEncoded(t *testing.T) {
+	t.Parallel()
+
+	// Simulate a favorite whose direct URI is double-encoded.
+	f := DIDLItem{
+		URI: "x-sonos-http:SONG%253a12345%253a.mp3",
+	}
+	got := favoriteURI(f)
+	want := "x-sonos-http:SONG%3a12345%3a.mp3"
+	if got != want {
+		t.Errorf("favoriteURI with double-encoded URI = %q, want %q", got, want)
+	}
+
+	// Simulate a favorite where the URI comes from resMD and is double-encoded.
+	f2 := DIDLItem{
+		ResMD: `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"><item id="x"><res>x-sonos-http:SONG%253a99999%253a.mp3</res></item></DIDL-Lite>`,
+	}
+	got2 := favoriteURI(f2)
+	want2 := "x-sonos-http:SONG%3a99999%3a.mp3"
+	if got2 != want2 {
+		t.Errorf("favoriteURI with double-encoded resMD URI = %q, want %q", got2, want2)
+	}
+}

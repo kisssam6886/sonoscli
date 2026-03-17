@@ -32,6 +32,8 @@
   - agent-facing design notes: `docs/agent-interface-v1.md`
   - JSON schema draft: `docs/json-schema-v1.md`
   - agent onboarding guide: `docs/agent-quickstart.md`
+  - queue request draft: `docs/queue-request-v1.md`
+  - service adapter draft: `docs/service-adapter-v1.md`
 
 This is not an official Sonos project.
 

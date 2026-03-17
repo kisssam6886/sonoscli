@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -11,6 +12,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steipete/sonoscli/internal/sonos"
 )
+
+const defaultArtistQueueSize = 8
 
 func init() {
 	rand.Seed(time.Now().UnixNano())
@@ -62,17 +65,15 @@ func newNCMPlayCmd(flags *rootFlags) *cobra.Command {
 				return fmt.Errorf("--index %d out of range (got %d playable tracks)", index, len(items))
 			}
 			selected := items[index-1]
-			playURI := buildNCMTrackURI(selected.ID)
-			c, err := newSourceClient(ctx, flags)
+			qc, err := coordinatorClient(ctx, flags)
 			if err != nil {
 				return err
 			}
-			if err := c.SetAVTransportURI(ctx, playURI, ""); err != nil {
+			queued, err := rebuildNCMQueue(ctx, qc, dedupeNCMTracks(items), index-1)
+			if err != nil {
 				return err
 			}
-			if err := c.Play(ctx); err != nil {
-				return err
-			}
+			playURI := buildNCMTrackURI(selected.ID)
 			if isJSON(flags) {
 				return writeJSON(cmd, map[string]any{
 					"service":      svc.Name,
@@ -82,6 +83,7 @@ func newNCMPlayCmd(flags *rootFlags) *cobra.Command {
 					"selected":     selected,
 					"uri":          playURI,
 					"playableHits": len(items),
+					"queued":       queued,
 				})
 			}
 			writePlainLine(cmd, flags, fmt.Sprintf("已播放：%s", selected.Title))
@@ -121,22 +123,20 @@ func newNCMLuckyCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			items := onlyNCMTracks(toLikeItemsFromMetadata(res.MediaMetadata))
+			items := dedupeNCMTracks(onlyNCMTracks(toLikeItemsFromMetadata(res.MediaMetadata)))
 			if len(items) == 0 {
 				return errors.New("no playable tracks")
 			}
 			selected := items[rand.Intn(len(items))]
-			playURI := buildNCMTrackURI(selected.ID)
-			c, err := newSourceClient(ctx, flags)
+			qc, err := coordinatorClient(ctx, flags)
 			if err != nil {
 				return err
 			}
-			if err := c.SetAVTransportURI(ctx, playURI, ""); err != nil {
+			queued, err := rebuildNCMQueue(ctx, qc, items, findTrackIndex(items, selected.ID))
+			if err != nil {
 				return err
 			}
-			if err := c.Play(ctx); err != nil {
-				return err
-			}
+			playURI := buildNCMTrackURI(selected.ID)
 			if isJSON(flags) {
 				return writeJSON(cmd, map[string]any{
 					"service":      svc.Name,
@@ -145,6 +145,7 @@ func newNCMLuckyCmd(flags *rootFlags) *cobra.Command {
 					"selected":     selected,
 					"uri":          playURI,
 					"playableHits": len(items),
+					"queued":       queued,
 				})
 			}
 			writePlainLine(cmd, flags, fmt.Sprintf("已随机播放：%s", selected.Title))
@@ -187,6 +188,66 @@ func onlyNCMTracks(items []smapiLikeItem) []smapiLikeItem {
 		}
 	}
 	return out
+}
+
+func dedupeNCMTracks(items []smapiLikeItem) []smapiLikeItem {
+	seen := map[string]struct{}{}
+	out := make([]smapiLikeItem, 0, len(items))
+	for _, it := range items {
+		id := strings.TrimSpace(it.ID)
+		title := strings.TrimSpace(strings.ToLower(it.Title))
+		key := id + "|" + title
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, it)
+		if len(out) >= defaultArtistQueueSize {
+			break
+		}
+	}
+	return out
+}
+
+func findTrackIndex(items []smapiLikeItem, id string) int {
+	id = strings.TrimSpace(id)
+	for i, it := range items {
+		if strings.TrimSpace(it.ID) == id {
+			return i
+		}
+	}
+	return 0
+}
+
+func rebuildNCMQueue(ctx context.Context, c *sonos.Client, items []smapiLikeItem, startIndex int) ([]smapiLikeItem, error) {
+	if len(items) == 0 {
+		return nil, errors.New("no tracks to queue")
+	}
+	if startIndex < 0 || startIndex >= len(items) {
+		startIndex = 0
+	}
+	ordered := make([]smapiLikeItem, 0, len(items))
+	ordered = append(ordered, items[startIndex:]...)
+	ordered = append(ordered, items[:startIndex]...)
+	if len(ordered) > defaultArtistQueueSize {
+		ordered = ordered[:defaultArtistQueueSize]
+	}
+	if err := c.ClearQueue(ctx); err != nil {
+		return nil, err
+	}
+	for i, it := range ordered {
+		if _, err := c.AddURIToQueue(ctx, buildNCMTrackURI(it.ID), "", i+1, false); err != nil {
+			return ordered[:i], err
+		}
+	}
+	if err := c.PlayQueuePosition(ctx, 1); err != nil {
+		return ordered, err
+	}
+	_ = c.SetPlayMode(ctx, sonos.PlayModeShuffle)
+	return ordered, nil
 }
 
 func buildNCMTrackURI(id string) string {

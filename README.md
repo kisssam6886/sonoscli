@@ -23,6 +23,7 @@
   - `mode get|shuffle|shuffle-norepeat|repeat|repeat-one|normal`
   - `tv` / `music` for switching between TV input and Sonos music queue mode
   - `ncm categories|browse|search|play|lucky|auth ...` for 网易云音乐 via Sonos SMAPI
+  - `ncm play/lucky` now rebuilds the Sonos queue with ~8 matching tracks before playback
   - built-in alias normalization for common names like `Sammi`/`Eason`/`Jay`/`GEM`
 
 This is not an official Sonos project.

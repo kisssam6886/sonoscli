@@ -25,8 +25,13 @@
   - `mode get|shuffle|shuffle-norepeat|repeat|repeat-one|normal`
   - `tv` / `music` for switching between TV input and Sonos music queue mode
   - `ncm categories|browse|search|play|lucky|auth ...` for 网易云音乐 via Sonos SMAPI
-  - `ncm play/lucky` now rebuilds the Sonos queue with ~8 matching tracks before playback
+  - `ncm play/lucky` now rebuilds the Sonos queue with matching tracks before playback
+  - repaired NCM queue metadata so Sonos queue titles/artist/album render correctly
+  - improved NCM queue start reliability when transport gets stuck in `TRANSITIONING`
   - built-in alias normalization for common names like `Sammi`/`Eason`/`Jay`/`GEM`
+  - agent-facing design notes: `docs/agent-interface-v1.md`
+  - JSON schema draft: `docs/json-schema-v1.md`
+  - agent onboarding guide: `docs/agent-quickstart.md`
 
 This is not an official Sonos project.
 

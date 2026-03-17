@@ -2,12 +2,12 @@
 
 ## 仓库收口（当前优先）
 
-- [ ] 清理 `cmd/tmp_*` 临时探针代码
+- [x] 清理 `cmd/tmp_*` 临时探针代码
 - [ ] 固化已验证能力为正式接口
 - [ ] 统一 queue action 模型（append / insert-front / insert-next / replace）
 - [ ] 统一 source 模型（artist / chart / playlist / album / search）
-- [ ] 起草 JSON request / response / error schema
-- [ ] 写 Agent Quickstart
+- [x] 起草 JSON request / response / error schema
+- [x] 写 Agent Quickstart
 - [ ] 评估并设计 ServiceAdapter 抽象
 
 ## 已完成基础

@@ -1,6 +1,8 @@
-# 🔊 sonoscli — Discover, group, and control Sonos
+# 🔊 sonoscli-plus — Discover, group, and control Sonos
 
-`sonoscli` is a modern Go CLI to control Sonos speakers over your local network (UPnP/SOAP).
+`sonoscli-plus` is Sam 本地维护的 Sonos CLI 增强版 fork，基于 `sonoscli` 扩展。
+
+当前额外保留的播放模式命令：`mode get` / `mode shuffle` / `mode shuffle-norepeat` / `mode repeat` / `mode repeat-one` / `mode normal`。
 
 ## Features
 

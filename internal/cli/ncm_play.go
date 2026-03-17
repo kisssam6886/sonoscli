@@ -271,6 +271,11 @@ func rebuildNCMQueueNative(ctx context.Context, c *sonos.Client, items []smapiLi
 	if err := c.PlayQueuePosition(ctx, playPos); err != nil {
 		return queued, err
 	}
+	_ = c.Play(ctx)
+	if ti, err := c.GetTransportInfo(ctx); err == nil && strings.EqualFold(strings.TrimSpace(ti.State), "TRANSITIONING") {
+		time.Sleep(1200 * time.Millisecond)
+		_ = c.Play(ctx)
+	}
 	return queued, nil
 }
 

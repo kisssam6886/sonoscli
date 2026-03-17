@@ -118,6 +118,7 @@ func newRootCmd() (*cobra.Command, *rootFlags, error) {
 	rootCmd.AddCommand(newPlayURICmd(flags))
 	rootCmd.AddCommand(newLineInCmd(flags))
 	rootCmd.AddCommand(newTVCmd(flags))
+	rootCmd.AddCommand(newMusicCmd(flags))
 	rootCmd.AddCommand(newQueueCmd(flags))
 	rootCmd.AddCommand(newVolumeCmd(flags))
 	rootCmd.AddCommand(newMuteCmd(flags))

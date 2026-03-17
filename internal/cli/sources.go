@@ -143,21 +143,7 @@ func newTVCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 
-			// Resolve UUID of the targeted device.
-			tg, err := newTopologyGetter(cmd.Context(), flags.Timeout)
-			if err != nil {
-				return err
-			}
-			top, err := tg.GetTopology(cmd.Context())
-			if err != nil {
-				return err
-			}
-
-			target := flags.Name
-			if target == "" {
-				target = flags.IP
-			}
-			mem, err := resolveMember(top, target, "")
+			mem, err := resolveTargetMember(cmd.Context(), flags)
 			if err != nil {
 				return err
 			}
@@ -176,4 +162,58 @@ func newTVCmd(flags *rootFlags) *cobra.Command {
 		},
 	}
 	return cmd
+}
+
+func newMusicCmd(flags *rootFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:          "music",
+		Short:        "Switch playback back to Sonos music/queue mode",
+		Long:         "Switches the target speaker/group back to the Sonos queue/music transport and resumes playback.",
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validateTarget(flags); err != nil {
+				return err
+			}
+
+			c, err := newSourceClient(cmd.Context(), flags)
+			if err != nil {
+				return err
+			}
+
+			mem, err := resolveTargetMember(cmd.Context(), flags)
+			if err != nil {
+				return err
+			}
+			if mem.UUID == "" {
+				return errors.New("target has no UUID in topology")
+			}
+
+			uri := "x-rincon-queue:" + mem.UUID + "#0"
+			if err := c.SetAVTransportURI(cmd.Context(), uri, ""); err != nil {
+				return err
+			}
+			if err := c.Play(cmd.Context()); err != nil {
+				return err
+			}
+			return writeOK(cmd, flags, "music", map[string]any{"target": mem, "uri": uri})
+		},
+	}
+	return cmd
+}
+
+func resolveTargetMember(ctx context.Context, flags *rootFlags) (sonos.Member, error) {
+	tg, err := newTopologyGetter(ctx, flags.Timeout)
+	if err != nil {
+		return sonos.Member{}, err
+	}
+	top, err := tg.GetTopology(ctx)
+	if err != nil {
+		return sonos.Member{}, err
+	}
+
+	target := flags.Name
+	if target == "" {
+		target = flags.IP
+	}
+	return resolveMember(top, target, "")
 }

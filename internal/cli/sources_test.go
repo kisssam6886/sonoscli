@@ -139,3 +139,44 @@ func TestTVCmd(t *testing.T) {
 		t.Fatalf("unexpected uri: %q", fake.uri)
 	}
 }
+
+func TestMusicCmd(t *testing.T) {
+	flags := &rootFlags{Name: "Living Room", Timeout: 2 * time.Second}
+	cmd := newMusicCmd(flags)
+
+	top := sonos.Topology{
+		ByName: map[string]sonos.Member{
+			"Living Room": {Name: "Living Room", IP: "192.168.1.10", UUID: "RINCON_LR1400"},
+		},
+		ByIP: map[string]sonos.Member{
+			"192.168.1.10": {Name: "Living Room", IP: "192.168.1.10", UUID: "RINCON_LR1400"},
+		},
+	}
+
+	origTG := newTopologyGetter
+	origClient := newSourceClient
+	t.Cleanup(func() {
+		newTopologyGetter = origTG
+		newSourceClient = origClient
+	})
+
+	newTopologyGetter = func(ctx context.Context, timeout time.Duration) (topologyGetter, error) {
+		return &fakeTopologyGetter{top: top}, nil
+	}
+	fake := &fakeSourceClient{}
+	newSourceClient = func(ctx context.Context, flags *rootFlags) (sourceClient, error) {
+		return fake, nil
+	}
+
+	cmd.SetOut(newDiscardWriter())
+	cmd.SetErr(newDiscardWriter())
+	cmd.SetArgs([]string{})
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fake.uri != "x-rincon-queue:RINCON_LR1400#0" {
+		t.Fatalf("unexpected uri: %q", fake.uri)
+	}
+}

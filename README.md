@@ -21,6 +21,7 @@
 - **Scriptable output**: `--format plain|json|tsv` plus `--debug` tracing.
 - **sonoscli-plus extras**:
   - `mode get|shuffle|shuffle-norepeat|repeat|repeat-one|normal`
+  - `tv` / `music` for switching between TV input and Sonos music queue mode
   - `ncm categories|browse|search|play|lucky|auth ...` for 网易云音乐 via Sonos SMAPI
   - built-in alias normalization for common names like `Sammi`/`Eason`/`Jay`/`GEM`
 

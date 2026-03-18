@@ -292,8 +292,12 @@ func TestSceneApplyMissingScene(t *testing.T) {
 	cmd.SetArgs([]string{"apply", "Nope"})
 	cmd.SilenceErrors = true
 	cmd.SilenceUsage = true
-	if err := cmd.ExecuteContext(context.Background()); err == nil {
+	err := cmd.ExecuteContext(context.Background())
+	if err == nil {
 		t.Fatalf("expected error")
+	}
+	if code := errorCode(err); code != errCodeNotFound {
+		t.Fatalf("code = %q, want %q", code, errCodeNotFound)
 	}
 }
 
@@ -352,5 +356,8 @@ func TestSceneDeleteJSON(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "\"action\": \"scene.delete\"") {
 		t.Fatalf("unexpected output: %q", out.String())
+	}
+	if !strings.Contains(out.String(), "\"capability\": \"scene\"") || !strings.Contains(out.String(), "\"operation\": \"delete\"") {
+		t.Fatalf("missing execution envelope: %q", out.String())
 	}
 }

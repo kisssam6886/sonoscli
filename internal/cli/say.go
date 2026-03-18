@@ -40,6 +40,7 @@ func newSayCmd(flags *rootFlags) *cobra.Command {
 			if text == "" {
 				return fmt.Errorf("text is required")
 			}
+			hadExplicitAudioURI := strings.TrimSpace(audioURI) != ""
 
 			ctx := cmd.Context()
 			c, err := coordinatorClient(ctx, flags)
@@ -113,7 +114,41 @@ func newSayCmd(flags *rootFlags) *cobra.Command {
 				restored = true
 			}
 
-			return writeOK(cmd, flags, "say", map[string]any{
+			target := map[string]any{
+				"coordinatorIP": c.IP,
+			}
+			if strings.TrimSpace(flags.Name) != "" {
+				target["room"] = strings.TrimSpace(flags.Name)
+			}
+			if strings.TrimSpace(flags.IP) != "" {
+				target["ip"] = strings.TrimSpace(flags.IP)
+			}
+			request := map[string]any{
+				"text":         text,
+				"inputMode":    "auto-tts",
+				"radio":        radio,
+				"tempVolume":   tempVolume,
+				"lang":         lang,
+				"voice":        strings.TrimSpace(voice),
+				"style":        style,
+				"rate":         rate,
+				"holdSeconds":  holdSeconds,
+				"usedAudioURI": audioURI,
+			}
+			if hadExplicitAudioURI {
+				request["inputMode"] = "audio-uri"
+			}
+			if strings.TrimSpace(title) != "" {
+				request["title"] = strings.TrimSpace(title)
+			}
+			result := map[string]any{
+				"audioURI":   audioURI,
+				"voice":      voice,
+				"radio":      radio,
+				"tempVolume": tempVolume,
+			}
+
+			return writeExecutionOK(cmd, flags, "say", newExecutionOutput("say", "announce", target, request, result), map[string]any{
 				"coordinatorIP": c.IP,
 				"text":          text,
 				"audioURI":      audioURI,

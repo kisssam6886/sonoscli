@@ -1,6 +1,10 @@
 package cli
 
-import "github.com/spf13/cobra"
+import (
+	"strings"
+
+	"github.com/spf13/cobra"
+)
 
 const executionEnvelopeVersion = "v1"
 
@@ -117,4 +121,22 @@ func compactMap(in map[string]any) map[string]any {
 		return nil
 	}
 	return out
+}
+
+func executionTargetFromFlags(flags *rootFlags) map[string]any {
+	if flags == nil {
+		return nil
+	}
+	out := map[string]any{}
+	if room := compactString(flags.Name); room != "" {
+		out["room"] = room
+	}
+	if ip := compactString(flags.IP); ip != "" {
+		out["ip"] = ip
+	}
+	return compactMap(out)
+}
+
+func compactString(s string) string {
+	return strings.TrimSpace(s)
 }

@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/rand"
 	"net/url"
@@ -15,6 +14,11 @@ import (
 
 func init() {
 	rand.Seed(time.Now().UnixNano())
+}
+
+var executeNCMQueueRebuild = rebuildNCMQueueNative
+var newNCMCoordinatorClient = func(ctx context.Context, flags *rootFlags) (queuePlaybackClient, error) {
+	return coordinatorClient(ctx, flags)
 }
 
 func newNCMPlayCmd(flags *rootFlags) *cobra.Command {
@@ -34,7 +38,9 @@ func newNCMPlayCmd(flags *rootFlags) *cobra.Command {
 			}
 			query := normalizeNCMQuery(strings.TrimSpace(strings.Join(args, " ")))
 			if query == "" {
-				return errors.New("query is required")
+				return newQueryRequiredError(map[string]any{
+					"source": "netease.ncm",
+				})
 			}
 			if strings.TrimSpace(category) == "" {
 				category = "tracks"
@@ -57,24 +63,53 @@ func newNCMPlayCmd(flags *rootFlags) *cobra.Command {
 			}
 			items := onlyNCMTracks(append(toLikeItemsFromMetadata(res.MediaMetadata), toLikeItemsFromCollections(res.MediaCollection)...))
 			if len(items) == 0 {
-				return errors.New("no playable tracks")
+				return newNoResultsError("no playable tracks", map[string]any{
+					"source":   "netease.ncm",
+					"query":    query,
+					"category": category,
+				})
 			}
 			if index > len(items) {
-				return fmt.Errorf("--index %d out of range (got %d playable tracks)", index, len(items))
+				return newPlayableIndexOutOfRangeError(index, len(items), map[string]any{
+					"source":   "netease.ncm",
+					"query":    query,
+					"category": category,
+				})
 			}
 			selected := items[index-1]
-			qc, err := coordinatorClient(ctx, flags)
+			qc, err := newNCMCoordinatorClient(ctx, flags)
 			if err != nil {
 				return err
 			}
 			queuedItems := dedupeNCMTracks(items)
-			queued, err := rebuildNCMQueueNative(ctx, qc, queuedItems, index-1)
+			playIndex := findLikeItemIndexByID(queuedItems, selected.ID)
+			if playIndex < 0 {
+				return newStateInconsistentError(fmt.Sprintf("selected track %q missing after dedupe", selected.ID), map[string]any{
+					"source":     "netease.ncm",
+					"query":      query,
+					"selectedID": selected.ID,
+				})
+			}
+			playback, err := executeNCMQueueRebuild(ctx, qc, queuedItems, playIndex)
 			if err != nil {
 				return err
 			}
 			playURI := buildNCMTrackURI(selected.ID)
 			if isJSON(flags) {
-				return writeJSON(cmd, map[string]any{
+				target := executionTargetFromFlags(flags)
+				target["speakerIP"] = speaker.IP
+				return writeExecutionOK(cmd, flags, "ncm.play", newExecutionOutput("music.netease", "play", target, map[string]any{
+					"query":    query,
+					"category": category,
+					"limit":    limit,
+					"index":    index,
+				}, map[string]any{
+					"selectedID":     selected.ID,
+					"selectedTitle":  selected.Title,
+					"playableHits":   len(items),
+					"queuedTracks":   playback.EnqueuedCount,
+					"playedPosition": playback.PlayedPosition,
+				}), map[string]any{
 					"service":      svc.Name,
 					"speakerIP":    speaker.IP,
 					"category":     category,
@@ -82,7 +117,8 @@ func newNCMPlayCmd(flags *rootFlags) *cobra.Command {
 					"selected":     selected,
 					"uri":          playURI,
 					"playableHits": len(items),
-					"queuedTracks": len(queued),
+					"queuedTracks": playback.EnqueuedCount,
+					"playback":     playback,
 				})
 			}
 			writePlainLine(cmd, flags, fmt.Sprintf("已播放：%s", selected.Title))
@@ -108,7 +144,9 @@ func newNCMLuckyCmd(flags *rootFlags) *cobra.Command {
 			}
 			query := normalizeNCMQuery(strings.TrimSpace(strings.Join(args, " ")))
 			if query == "" {
-				return errors.New("query is required")
+				return newQueryRequiredError(map[string]any{
+					"source": "netease.ncm",
+				})
 			}
 			if limit <= 0 {
 				limit = 20
@@ -124,29 +162,54 @@ func newNCMLuckyCmd(flags *rootFlags) *cobra.Command {
 			}
 			items := onlyNCMTracks(toLikeItemsFromMetadata(res.MediaMetadata))
 			if len(items) == 0 {
-				return errors.New("no playable tracks")
+				return newNoResultsError("no playable tracks", map[string]any{
+					"source":   "netease.ncm",
+					"query":    query,
+					"category": "tracks",
+				})
 			}
 			selectedIndex := rand.Intn(len(items))
 			selected := items[selectedIndex]
 			queuedItems := dedupeNCMTracks(items)
-			c, err := coordinatorClient(ctx, flags)
+			c, err := newNCMCoordinatorClient(ctx, flags)
 			if err != nil {
 				return err
 			}
-			queued, err := rebuildNCMQueueNative(ctx, c, queuedItems, selectedIndex)
+			playIndex := findLikeItemIndexByID(queuedItems, selected.ID)
+			if playIndex < 0 {
+				return newStateInconsistentError(fmt.Sprintf("selected track %q missing after dedupe", selected.ID), map[string]any{
+					"source":     "netease.ncm",
+					"query":      query,
+					"selectedID": selected.ID,
+				})
+			}
+			playback, err := executeNCMQueueRebuild(ctx, c, queuedItems, playIndex)
 			if err != nil {
 				return err
 			}
 			playURI := buildNCMTrackURI(selected.ID)
 			if isJSON(flags) {
-				return writeJSON(cmd, map[string]any{
+				target := executionTargetFromFlags(flags)
+				target["speakerIP"] = speaker.IP
+				return writeExecutionOK(cmd, flags, "ncm.lucky", newExecutionOutput("music.netease", "lucky", target, map[string]any{
+					"query": query,
+					"limit": limit,
+				}, map[string]any{
+					"selectedID":     selected.ID,
+					"selectedTitle":  selected.Title,
+					"selectedIndex":  selectedIndex,
+					"playableHits":   len(items),
+					"queuedTracks":   playback.EnqueuedCount,
+					"playedPosition": playback.PlayedPosition,
+				}), map[string]any{
 					"service":      svc.Name,
 					"speakerIP":    speaker.IP,
 					"query":        query,
 					"selected":     selected,
 					"uri":          playURI,
 					"playableHits": len(items),
-					"queuedTracks": len(queued),
+					"queuedTracks": playback.EnqueuedCount,
+					"playback":     playback,
 				})
 			}
 			writePlainLine(cmd, flags, fmt.Sprintf("已随机播放：%s", selected.Title))
@@ -158,16 +221,16 @@ func newNCMLuckyCmd(flags *rootFlags) *cobra.Command {
 }
 
 type smapiLikeItem struct {
-	ID            string `json:"id"`
-	ItemType      string `json:"itemType"`
-	Title         string `json:"title"`
-	Summary       string `json:"summary,omitempty"`
-	Artist        string `json:"artist,omitempty"`
-	Album         string `json:"album,omitempty"`
-	AlbumArtURI   string `json:"albumArtURI,omitempty"`
-	DurationSec   int    `json:"durationSec,omitempty"`
-	CanPlay       bool   `json:"canPlay,omitempty"`
-	CanSkip       bool   `json:"canSkip,omitempty"`
+	ID          string `json:"id"`
+	ItemType    string `json:"itemType"`
+	Title       string `json:"title"`
+	Summary     string `json:"summary,omitempty"`
+	Artist      string `json:"artist,omitempty"`
+	Album       string `json:"album,omitempty"`
+	AlbumArtURI string `json:"albumArtURI,omitempty"`
+	DurationSec int    `json:"durationSec,omitempty"`
+	CanPlay     bool   `json:"canPlay,omitempty"`
+	CanSkip     bool   `json:"canSkip,omitempty"`
 }
 
 func toLikeItemsFromMetadata(items []sonos.SMAPIItem) []smapiLikeItem {
@@ -242,41 +305,35 @@ func dedupeNCMTracks(items []smapiLikeItem) []smapiLikeItem {
 	return out
 }
 
-func rebuildNCMQueueNative(ctx context.Context, c *sonos.Client, items []smapiLikeItem, selectedIndex int) ([]int, error) {
-	if len(items) == 0 {
-		return nil, errors.New("no queueable tracks")
+func findLikeItemIndexByID(items []smapiLikeItem, id string) int {
+	key := strings.ToUpper(strings.TrimSpace(id))
+	if key == "" {
+		return -1
 	}
-	if selectedIndex < 0 || selectedIndex >= len(items) {
-		return nil, fmt.Errorf("selected index %d out of range for %d tracks", selectedIndex, len(items))
-	}
-	if err := c.ClearQueue(ctx); err != nil {
-		return nil, err
-	}
-
-	queued := make([]int, 0, len(items))
-	for _, it := range items {
-		uri := buildNCMTrackURI(it.ID)
-		meta := buildNCMQueueTrackMeta(it)
-		pos, err := c.AddURIToQueue(ctx, uri, meta, 0, false)
-		if err != nil {
-			return queued, fmt.Errorf("enqueue %q failed: %w", it.Title, err)
+	for idx, it := range items {
+		if strings.ToUpper(strings.TrimSpace(it.ID)) == key {
+			return idx
 		}
-		queued = append(queued, pos)
 	}
+	return -1
+}
 
-	playPos := queued[selectedIndex]
-	if playPos <= 0 {
-		playPos = selectedIndex + 1
+func rebuildNCMQueueNative(ctx context.Context, c queuePlaybackClient, items []smapiLikeItem, selectedIndex int) (queuePlaybackResult, error) {
+	queueItems := make([]queuePlaybackItem, 0, len(items))
+	for _, it := range items {
+		queueItems = append(queueItems, queuePlaybackItem{
+			ID:       it.ID,
+			Title:    it.Title,
+			URI:      buildNCMTrackURI(it.ID),
+			Metadata: buildNCMQueueTrackMeta(it),
+		})
 	}
-	if err := c.PlayQueuePosition(ctx, playPos); err != nil {
-		return queued, err
-	}
-	_ = c.Play(ctx)
-	if ti, err := c.GetTransportInfo(ctx); err == nil && strings.EqualFold(strings.TrimSpace(ti.State), "TRANSITIONING") {
-		time.Sleep(1200 * time.Millisecond)
-		_ = c.Play(ctx)
-	}
-	return queued, nil
+	return executeQueuePlayback(ctx, c, queueItems, queuePlaybackOptions{
+		Source:        "netease.ncm",
+		ClearQueue:    true,
+		PlayNow:       true,
+		SelectedIndex: selectedIndex,
+	})
 }
 
 func buildNCMQueueTrackMeta(it smapiLikeItem) string {

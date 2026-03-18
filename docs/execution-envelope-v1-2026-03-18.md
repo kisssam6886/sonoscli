@@ -107,6 +107,20 @@ JSON 模式下，这三类命令会额外返回：
 - `schedule run`
 - `schedule serve`（JSON line event）
 
+### `queue`
+- `queue list`
+- `queue clear`
+- `queue play`
+- `queue remove`
+
+### `music.netease`
+- `ncm play`
+- `ncm lucky`
+
+### `music.smapi`
+- `smapi search`
+- `smapi browse`
+
 ---
 
 ## 5) 为什么这样做
@@ -132,8 +146,11 @@ JSON 模式下，这三类命令会额外返回：
 - `say`
 - `scene`
 - `schedule`
+- `queue`
+- `ncm`
+- `smapi search/browse`
 
-这三类比较适合“场景化执行”的能力统一起来。
+这些比较适合“场景化执行”的能力，先统一起来。
 
 ---
 

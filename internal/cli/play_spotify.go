@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -59,6 +58,14 @@ var newSMAPISearcher = func(ctx context.Context, flags *rootFlags, serviceName s
 	return sm, svc, speaker, nil
 }
 
+func spotifyServiceExecutionFields(svc sonos.MusicServiceDescriptor) map[string]any {
+	return compactMap(map[string]any{
+		"name": strings.TrimSpace(svc.Name),
+		"id":   strings.TrimSpace(svc.ID),
+		"auth": strings.TrimSpace(string(svc.Auth)),
+	})
+}
+
 func newPlaySpotifyCmd(flags *rootFlags) *cobra.Command {
 	var serviceName string
 	var category string
@@ -80,13 +87,18 @@ func newPlaySpotifyCmd(flags *rootFlags) *cobra.Command {
 
 			query := strings.TrimSpace(args[0])
 			if query == "" {
-				return errors.New("query is required")
+				return newQueryRequiredError(map[string]any{
+					"source": "spotify.smapi",
+				})
 			}
 			if strings.TrimSpace(category) == "" {
 				category = "tracks"
 			}
 			if index < 0 {
-				return errors.New("--index must be >= 0")
+				return newInvalidArgumentError("--index must be >= 0", map[string]any{
+					"action": "play.spotify",
+					"flag":   "index",
+				})
 			}
 
 			enq, err := newSpotifyEnqueuer(ctx, flags)
@@ -107,16 +119,28 @@ func newPlaySpotifyCmd(flags *rootFlags) *cobra.Command {
 			items := append([]sonos.SMAPIItem{}, res.MediaMetadata...)
 			items = append(items, res.MediaCollection...)
 			if len(items) == 0 {
-				return errors.New("no results")
+				return newNoResultsError("no results", map[string]any{
+					"source":   "spotify.smapi",
+					"query":    query,
+					"category": category,
+				})
 			}
 			if index >= len(items) {
-				return fmt.Errorf("--index %d out of range (results=%d)", index, len(items))
+				return newIndexOutOfRangeError(index, len(items), map[string]any{
+					"source":   "spotify.smapi",
+					"query":    query,
+					"category": category,
+				})
 			}
 
 			item := items[index]
 			ref := strings.TrimSpace(item.ID)
 			if _, ok := sonos.ParseSpotifyRef(ref); !ok {
-				return fmt.Errorf("result is not a playable Spotify ref: %q", ref)
+				return newUnsupportedRefError(fmt.Sprintf("result is not a playable Spotify ref: %q", ref), map[string]any{
+					"source": "spotify.smapi",
+					"query":  query,
+					"ref":    ref,
+				})
 			}
 
 			title := strings.TrimSpace(titleOverride)
@@ -132,7 +156,28 @@ func newPlaySpotifyCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			if isJSON(flags) {
-				return writeJSON(cmd, map[string]any{
+				operation := "play"
+				if enqueueOnly {
+					operation = "enqueue"
+				}
+				return writeExecutionOK(cmd, flags, "play.spotify", newExecutionOutput("music.spotify", operation, executionTargetFromFlags(flags), map[string]any{
+					"service":       spotifyServiceExecutionFields(svc),
+					"category":      category,
+					"query":         query,
+					"index":         index,
+					"enqueueOnly":   enqueueOnly,
+					"titleOverride": strings.TrimSpace(titleOverride),
+				}, map[string]any{
+					"service":        spotifyServiceExecutionFields(svc),
+					"speakerIP":      speaker.IP,
+					"coordinatorIP":  enq.CoordinatorIP(),
+					"selectedID":     strings.TrimSpace(item.ID),
+					"selectedTitle":  strings.TrimSpace(item.Title),
+					"selectedType":   strings.TrimSpace(item.ItemType),
+					"enqueuedPos":    pos,
+					"enqueueOnly":    enqueueOnly,
+					"titleEffective": title,
+				}), map[string]any{
 					"service": map[string]any{
 						"name": svc.Name,
 						"id":   svc.ID,

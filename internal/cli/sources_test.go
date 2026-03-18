@@ -58,6 +58,29 @@ func TestPlayURICmdRadio(t *testing.T) {
 	}
 }
 
+func TestPlayURICmdJSONIncludesExecutionEnvelope(t *testing.T) {
+	flags := &rootFlags{Name: "Kitchen", Timeout: 2 * time.Second, Format: formatJSON}
+	cmd := newPlayURICmd(flags)
+
+	fake := &fakeSourceClient{}
+	origClient := newSourceClient
+	t.Cleanup(func() { newSourceClient = origClient })
+	newSourceClient = func(ctx context.Context, flags *rootFlags) (sourceClient, error) {
+		return fake, nil
+	}
+
+	out, err := execute(t, cmd, "--radio", "--title", "My Station", "http://example.com/stream")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "\"action\": \"play-uri\"") || !strings.Contains(out, "\"capability\": \"transport.source\"") || !strings.Contains(out, "\"operation\": \"play-uri\"") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+	if !strings.Contains(out, "\"radio\": true") || !strings.Contains(out, "\"uri\": \"x-rincon-mp3radio://example.com/stream\"") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
 func TestLineInCmdFrom(t *testing.T) {
 	flags := &rootFlags{Name: "Living Room", Timeout: 2 * time.Second}
 	cmd := newLineInCmd(flags)
@@ -96,6 +119,46 @@ func TestLineInCmdFrom(t *testing.T) {
 	}
 	if fake.uri != "x-rincon-stream:RINCON_K1400" {
 		t.Fatalf("unexpected uri: %q", fake.uri)
+	}
+}
+
+func TestLineInCmdJSONIncludesExecutionEnvelope(t *testing.T) {
+	flags := &rootFlags{Name: "Living Room", Timeout: 2 * time.Second, Format: formatJSON}
+	cmd := newLineInCmd(flags)
+
+	top := sonos.Topology{
+		ByName: map[string]sonos.Member{
+			"Kitchen": {Name: "Kitchen", IP: "192.168.1.11", UUID: "RINCON_K1400"},
+		},
+		ByIP: map[string]sonos.Member{
+			"192.168.1.11": {Name: "Kitchen", IP: "192.168.1.11", UUID: "RINCON_K1400"},
+		},
+	}
+
+	origTG := newTopologyGetter
+	origClient := newSourceClient
+	t.Cleanup(func() {
+		newTopologyGetter = origTG
+		newSourceClient = origClient
+	})
+
+	newTopologyGetter = func(ctx context.Context, timeout time.Duration) (topologyGetter, error) {
+		return &fakeTopologyGetter{top: top}, nil
+	}
+	fake := &fakeSourceClient{}
+	newSourceClient = func(ctx context.Context, flags *rootFlags) (sourceClient, error) {
+		return fake, nil
+	}
+
+	out, err := execute(t, cmd, "--from", "Kitchen")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "\"action\": \"linein\"") || !strings.Contains(out, "\"capability\": \"transport.source\"") || !strings.Contains(out, "\"operation\": \"linein\"") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+	if !strings.Contains(out, "\"uri\": \"x-rincon-stream:RINCON_K1400\"") || !strings.Contains(out, "\"name\": \"Kitchen\"") {
+		t.Fatalf("unexpected output: %q", out)
 	}
 }
 
@@ -140,6 +203,46 @@ func TestTVCmd(t *testing.T) {
 	}
 }
 
+func TestTVCmdJSONIncludesExecutionEnvelope(t *testing.T) {
+	flags := &rootFlags{Name: "Living Room", Timeout: 2 * time.Second, Format: formatJSON}
+	cmd := newTVCmd(flags)
+
+	top := sonos.Topology{
+		ByName: map[string]sonos.Member{
+			"Living Room": {Name: "Living Room", IP: "192.168.1.10", UUID: "RINCON_LR1400"},
+		},
+		ByIP: map[string]sonos.Member{
+			"192.168.1.10": {Name: "Living Room", IP: "192.168.1.10", UUID: "RINCON_LR1400"},
+		},
+	}
+
+	origTG := newTopologyGetter
+	origClient := newSourceClient
+	t.Cleanup(func() {
+		newTopologyGetter = origTG
+		newSourceClient = origClient
+	})
+
+	newTopologyGetter = func(ctx context.Context, timeout time.Duration) (topologyGetter, error) {
+		return &fakeTopologyGetter{top: top}, nil
+	}
+	fake := &fakeSourceClient{}
+	newSourceClient = func(ctx context.Context, flags *rootFlags) (sourceClient, error) {
+		return fake, nil
+	}
+
+	out, err := execute(t, cmd)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "\"action\": \"tv\"") || !strings.Contains(out, "\"capability\": \"transport.source\"") || !strings.Contains(out, "\"operation\": \"tv\"") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+	if !strings.Contains(out, "\"uri\": \"x-sonos-htastream:RINCON_LR1400:spdif\"") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
 func TestMusicCmd(t *testing.T) {
 	flags := &rootFlags{Name: "Living Room", Timeout: 2 * time.Second}
 	cmd := newMusicCmd(flags)
@@ -178,5 +281,45 @@ func TestMusicCmd(t *testing.T) {
 	}
 	if fake.uri != "x-rincon-queue:RINCON_LR1400#0" {
 		t.Fatalf("unexpected uri: %q", fake.uri)
+	}
+}
+
+func TestMusicCmdJSONIncludesExecutionEnvelope(t *testing.T) {
+	flags := &rootFlags{Name: "Living Room", Timeout: 2 * time.Second, Format: formatJSON}
+	cmd := newMusicCmd(flags)
+
+	top := sonos.Topology{
+		ByName: map[string]sonos.Member{
+			"Living Room": {Name: "Living Room", IP: "192.168.1.10", UUID: "RINCON_LR1400"},
+		},
+		ByIP: map[string]sonos.Member{
+			"192.168.1.10": {Name: "Living Room", IP: "192.168.1.10", UUID: "RINCON_LR1400"},
+		},
+	}
+
+	origTG := newTopologyGetter
+	origClient := newSourceClient
+	t.Cleanup(func() {
+		newTopologyGetter = origTG
+		newSourceClient = origClient
+	})
+
+	newTopologyGetter = func(ctx context.Context, timeout time.Duration) (topologyGetter, error) {
+		return &fakeTopologyGetter{top: top}, nil
+	}
+	fake := &fakeSourceClient{}
+	newSourceClient = func(ctx context.Context, flags *rootFlags) (sourceClient, error) {
+		return fake, nil
+	}
+
+	out, err := execute(t, cmd)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "\"action\": \"music\"") || !strings.Contains(out, "\"capability\": \"transport.source\"") || !strings.Contains(out, "\"operation\": \"music\"") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+	if !strings.Contains(out, "\"uri\": \"x-rincon-queue:RINCON_LR1400#0\"") {
+		t.Fatalf("unexpected output: %q", out)
 	}
 }

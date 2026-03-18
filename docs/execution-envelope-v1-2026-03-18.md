@@ -128,6 +128,12 @@ JSON 模式下，这三类命令会额外返回：
 - `mode repeat-one`
 - `mode normal`
 
+### `transport.source`
+- `play-uri`
+- `linein`
+- `tv`
+- `music`
+
 ### `favorites`
 - `favorites list`
 - `favorites open`
@@ -143,6 +149,7 @@ JSON 模式下，这三类命令会额外返回：
 ### `music.spotify`
 - `open`
 - `enqueue`
+- `play spotify`
 
 ---
 
@@ -181,7 +188,7 @@ JSON 模式下，这三类命令会额外返回：
 
 后续建议按这个顺序继续收口：
 
-1. `play spotify` / `play-uri` / `line-in` / `tv` / `music` 接入同一层 `execution`
+1. `status` / `volume` / `mute` / `search spotify` 等剩余高频入口接入同一层 `execution`
 2. 定义正式 request schema：
    - `target`
    - `service`

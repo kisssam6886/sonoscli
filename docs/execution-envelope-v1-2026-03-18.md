@@ -113,6 +113,25 @@ JSON 模式下，这三类命令会额外返回：
 - `queue play`
 - `queue remove`
 
+### `transport`
+- `play`
+- `pause`
+- `stop`
+- `next`
+- `prev`
+
+### `transport.mode`
+- `mode get`
+- `mode shuffle`
+- `mode shuffle-norepeat`
+- `mode repeat`
+- `mode repeat-one`
+- `mode normal`
+
+### `favorites`
+- `favorites list`
+- `favorites open`
+
 ### `music.netease`
 - `ncm play`
 - `ncm lucky`
@@ -120,6 +139,10 @@ JSON 模式下，这三类命令会额外返回：
 ### `music.smapi`
 - `smapi search`
 - `smapi browse`
+
+### `music.spotify`
+- `open`
+- `enqueue`
 
 ---
 
@@ -158,7 +181,7 @@ JSON 模式下，这三类命令会额外返回：
 
 后续建议按这个顺序继续收口：
 
-1. `music / queue / ncm / smapi` 接入同一层 `execution`
+1. `play spotify` / `play-uri` / `line-in` / `tv` / `music` 接入同一层 `execution`
 2. 定义正式 request schema：
    - `target`
    - `service`

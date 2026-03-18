@@ -2,9 +2,7 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -53,7 +51,19 @@ func newFavoritesListCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			if isJSON(flags) {
-				return writeJSON(cmd, page)
+				return writeExecutionOK(cmd, flags, "favorites.list", newExecutionOutput("favorites", "list", executionTargetFromFlags(flags), map[string]any{
+					"start": start,
+					"limit": limit,
+				}, map[string]any{
+					"numberReturned": page.NumberReturned,
+					"totalMatches":   page.TotalMatches,
+					"updateID":       page.UpdateID,
+				}), map[string]any{
+					"items":          page.Items,
+					"numberReturned": page.NumberReturned,
+					"totalMatches":   page.TotalMatches,
+					"updateID":       page.UpdateID,
+				})
 			}
 			if isTSV(flags) {
 				for _, it := range page.Items {
@@ -84,6 +94,20 @@ func newFavoritesListCmd(flags *rootFlags) *cobra.Command {
 	return cmd
 }
 
+func favoriteExecutionResult(it sonos.FavoriteItem) map[string]any {
+	return compactMap(map[string]any{
+		"position": it.Position,
+		"title":    strings.TrimSpace(it.Item.Title),
+		"uri":      strings.TrimSpace(it.Item.URI),
+	})
+}
+
+func writeFavoriteOpenExecutionOK(cmd *cobra.Command, flags *rootFlags, request map[string]any, favorite sonos.FavoriteItem) error {
+	return writeExecutionOK(cmd, flags, "favorites.open", newExecutionOutput("favorites", "open", executionTargetFromFlags(flags), request, favoriteExecutionResult(favorite)), map[string]any{
+		"favorite": favorite,
+	})
+}
+
 func newFavoritesOpenCmd(flags *rootFlags) *cobra.Command {
 	var index int
 
@@ -102,7 +126,9 @@ func newFavoritesOpenCmd(flags *rootFlags) *cobra.Command {
 				title = strings.TrimSpace(args[0])
 			}
 			if index <= 0 && title == "" {
-				return errors.New("provide --index or a title")
+				return newInvalidArgumentError("provide --index or a title", map[string]any{
+					"action": "favorites.open",
+				})
 			}
 
 			c, err := newFavoritesClient(cmd.Context(), flags)
@@ -116,12 +142,17 @@ func newFavoritesOpenCmd(flags *rootFlags) *cobra.Command {
 					return err
 				}
 				if len(page.Items) == 0 {
-					return errors.New("favorite index out of range: " + strconv.Itoa(index))
+					return newIndexOutOfRangeError(index, page.TotalMatches, map[string]any{
+						"action": "favorites.open",
+						"source": "sonos.favorites",
+					})
 				}
 				if err := c.PlayFavorite(cmd.Context(), page.Items[0].Item); err != nil {
 					return err
 				}
-				return writeOK(cmd, flags, "favorites.open", map[string]any{"favorite": page.Items[0]})
+				return writeFavoriteOpenExecutionOK(cmd, flags, map[string]any{
+					"index": index,
+				}, page.Items[0])
 			}
 
 			// Search pages until we find a matching title.
@@ -137,7 +168,9 @@ func newFavoritesOpenCmd(flags *rootFlags) *cobra.Command {
 						if err := c.PlayFavorite(cmd.Context(), it.Item); err != nil {
 							return err
 						}
-						return writeOK(cmd, flags, "favorites.open", map[string]any{"favorite": it})
+						return writeFavoriteOpenExecutionOK(cmd, flags, map[string]any{
+							"title": title,
+						}, it)
 					}
 				}
 				start += page.NumberReturned
@@ -146,7 +179,11 @@ func newFavoritesOpenCmd(flags *rootFlags) *cobra.Command {
 				}
 			}
 
-			return errors.New("favorite not found: " + title)
+			return newNotFoundError("favorite not found: "+title, map[string]any{
+				"action": "favorites.open",
+				"source": "sonos.favorites",
+				"title":  title,
+			})
 		},
 	}
 

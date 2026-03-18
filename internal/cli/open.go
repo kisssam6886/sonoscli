@@ -1,11 +1,24 @@
 package cli
 
 import (
-	"errors"
-
 	"github.com/spf13/cobra"
 	"github.com/steipete/sonoscli/internal/sonos"
 )
+
+func writeSpotifyQueueExecutionOK(cmd *cobra.Command, flags *rootFlags, action, coordinatorIP, ref, title string, asNext, playNow bool, pos int) error {
+	return writeExecutionOK(cmd, flags, action, newExecutionOutput("music.spotify", action, executionTargetFromFlags(flags), map[string]any{
+		"ref":     ref,
+		"title":   title,
+		"asNext":  asNext,
+		"playNow": playNow,
+	}, map[string]any{
+		"pos":           pos,
+		"coordinatorIP": coordinatorIP,
+	}), map[string]any{
+		"coordinatorIP": coordinatorIP,
+		"pos":           pos,
+	})
+}
 
 func newOpenCmd(flags *rootFlags) *cobra.Command {
 	var title string
@@ -18,14 +31,17 @@ func newOpenCmd(flags *rootFlags) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			c, err := coordinatorClient(ctx, flags)
-			if err != nil {
-				return err
-			}
 			ref := args[0]
 			_, ok := sonos.ParseSpotifyRef(ref)
 			if !ok {
-				return errors.New("currently only Spotify refs are supported by `open`")
+				return newUnsupportedRefError("currently only Spotify refs are supported by `open`", map[string]any{
+					"action": "open",
+					"ref":    ref,
+				})
+			}
+			c, err := coordinatorClient(ctx, flags)
+			if err != nil {
+				return err
 			}
 			pos, err := c.EnqueueSpotify(ctx, ref, sonos.EnqueueOptions{
 				Title:   title,
@@ -35,7 +51,7 @@ func newOpenCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return writeOK(cmd, flags, "open", map[string]any{"coordinatorIP": c.IP, "pos": pos})
+			return writeSpotifyQueueExecutionOK(cmd, flags, "open", c.IP, ref, title, asNext, true, pos)
 		},
 	}
 
@@ -55,14 +71,17 @@ func newEnqueueCmd(flags *rootFlags) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			c, err := coordinatorClient(ctx, flags)
-			if err != nil {
-				return err
-			}
 			ref := args[0]
 			_, ok := sonos.ParseSpotifyRef(ref)
 			if !ok {
-				return errors.New("currently only Spotify refs are supported by `enqueue`")
+				return newUnsupportedRefError("currently only Spotify refs are supported by `enqueue`", map[string]any{
+					"action": "enqueue",
+					"ref":    ref,
+				})
+			}
+			c, err := coordinatorClient(ctx, flags)
+			if err != nil {
+				return err
 			}
 			pos, err := c.EnqueueSpotify(ctx, ref, sonos.EnqueueOptions{
 				Title:   title,
@@ -72,7 +91,7 @@ func newEnqueueCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return writeOK(cmd, flags, "enqueue", map[string]any{"coordinatorIP": c.IP, "pos": pos})
+			return writeSpotifyQueueExecutionOK(cmd, flags, "enqueue", c.IP, ref, title, asNext, false, pos)
 		},
 	}
 

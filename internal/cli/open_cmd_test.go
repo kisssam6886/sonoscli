@@ -72,7 +72,7 @@ func TestOpenCmd_Plays(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if !strings.Contains(out, "\"action\": \"open\"") {
+	if !strings.Contains(out, "\"action\": \"open\"") || !strings.Contains(out, "\"capability\": \"music.spotify\"") || !strings.Contains(out, "\"operation\": \"open\"") {
 		t.Fatalf("unexpected output: %q", out)
 	}
 	if addCalls.Load() == 0 || playCalls.Load() == 0 {
@@ -134,7 +134,7 @@ func TestEnqueueCmd_DoesNotPlay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	if !strings.Contains(out, "\"action\": \"enqueue\"") {
+	if !strings.Contains(out, "\"action\": \"enqueue\"") || !strings.Contains(out, "\"capability\": \"music.spotify\"") || !strings.Contains(out, "\"operation\": \"enqueue\"") {
 		t.Fatalf("unexpected output: %q", out)
 	}
 	if addCalls.Load() == 0 {
@@ -142,5 +142,43 @@ func TestEnqueueCmd_DoesNotPlay(t *testing.T) {
 	}
 	if playCalls.Load() != 0 {
 		t.Fatalf("expected no Play, got %d", playCalls.Load())
+	}
+}
+
+func TestOpenCmd_UnsupportedRefReturnsCodedErrorBeforeNetwork(t *testing.T) {
+	flags := &rootFlags{IP: "192.168.1.10", Timeout: time.Second}
+	cmd := newOpenCmd(flags)
+
+	cmd.SetOut(newDiscardWriter())
+	cmd.SetErr(newDiscardWriter())
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{"https://example.com/not-spotify"})
+
+	err := cmd.ExecuteContext(context.Background())
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if code := errorCode(err); code != errCodeUnsupportedRef {
+		t.Fatalf("code = %q, want %q", code, errCodeUnsupportedRef)
+	}
+}
+
+func TestEnqueueCmd_UnsupportedRefReturnsCodedErrorBeforeNetwork(t *testing.T) {
+	flags := &rootFlags{IP: "192.168.1.10", Timeout: time.Second}
+	cmd := newEnqueueCmd(flags)
+
+	cmd.SetOut(newDiscardWriter())
+	cmd.SetErr(newDiscardWriter())
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{"https://example.com/not-spotify"})
+
+	err := cmd.ExecuteContext(context.Background())
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if code := errorCode(err); code != errCodeUnsupportedRef {
+		t.Fatalf("code = %q, want %q", code, errCodeUnsupportedRef)
 	}
 }

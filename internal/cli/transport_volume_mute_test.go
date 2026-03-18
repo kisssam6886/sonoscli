@@ -297,7 +297,7 @@ func TestTransportPrevFallsBackToSeek(t *testing.T) {
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(out.String(), `"action": "prev"`) {
+	if !strings.Contains(out.String(), `"action": "prev"`) || !strings.Contains(out.String(), `"capability": "transport"`) || !strings.Contains(out.String(), `"operation": "prev"`) {
 		t.Fatalf("unexpected output: %q", out.String())
 	}
 	got := strings.Join(calls, "\n")
@@ -347,7 +347,7 @@ func TestTransportPlayJSON(t *testing.T) {
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(out.String(), `"action": "play"`) {
+	if !strings.Contains(out.String(), `"action": "play"`) || !strings.Contains(out.String(), `"capability": "transport"`) || !strings.Contains(out.String(), `"operation": "play"`) {
 		t.Fatalf("unexpected output: %q", out.String())
 	}
 	got := strings.Join(calls, "\n")
@@ -367,19 +367,25 @@ func TestTransportPauseStopNextJSON(t *testing.T) {
 			name:   "pause",
 			cmdFn:  newPauseCmd,
 			expect: "AVTransport:1#Pause",
-			ok:     func(out string) bool { return strings.Contains(out, `"action": "pause"`) },
+			ok: func(out string) bool {
+				return strings.Contains(out, `"action": "pause"`) && strings.Contains(out, `"capability": "transport"`) && strings.Contains(out, `"operation": "pause"`)
+			},
 		},
 		{
 			name:   "stop",
 			cmdFn:  newStopCmd,
 			expect: "AVTransport:1#Stop",
-			ok:     func(out string) bool { return strings.Contains(out, `"action": "stop"`) },
+			ok: func(out string) bool {
+				return strings.Contains(out, `"action": "stop"`) && strings.Contains(out, `"capability": "transport"`) && strings.Contains(out, `"operation": "stop"`)
+			},
 		},
 		{
 			name:   "next",
 			cmdFn:  newNextCmd,
 			expect: "AVTransport:1#Next",
-			ok:     func(out string) bool { return strings.Contains(out, `"action": "next"`) },
+			ok: func(out string) bool {
+				return strings.Contains(out, `"action": "next"`) && strings.Contains(out, `"capability": "transport"`) && strings.Contains(out, `"operation": "next"`)
+			},
 		},
 	}
 

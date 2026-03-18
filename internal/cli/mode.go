@@ -37,9 +37,14 @@ Modes:
 					return err
 				}
 				if isJSON(flags) {
-					return writeJSON(cmd, map[string]any{
-						"playMode":      string(settings.PlayMode),
-						"coordinatorIP": c.IP,
+					return writeExecutionOK(cmd, flags, "mode.get", newExecutionOutput("transport.mode", "get", executionTargetFromFlags(flags), nil, map[string]any{
+						"playMode":       string(settings.PlayMode),
+						"recQualityMode": settings.RecQualityMode,
+						"coordinatorIP":  c.IP,
+					}), map[string]any{
+						"playMode":       string(settings.PlayMode),
+						"recQualityMode": settings.RecQualityMode,
+						"coordinatorIP":  c.IP,
 					})
 				}
 				if isTSV(flags) {
@@ -69,5 +74,13 @@ func setPlayMode(cmd *cobra.Command, flags *rootFlags, c *sonos.Client, mode son
 	if err := c.SetPlayMode(cmd.Context(), mode); err != nil {
 		return err
 	}
-	return writeOK(cmd, flags, action, map[string]any{"coordinatorIP": c.IP, "playMode": string(mode)})
+	return writeExecutionOK(cmd, flags, action, newExecutionOutput("transport.mode", "set", executionTargetFromFlags(flags), map[string]any{
+		"mode": string(mode),
+	}, map[string]any{
+		"playMode":      string(mode),
+		"coordinatorIP": c.IP,
+	}), map[string]any{
+		"coordinatorIP": c.IP,
+		"playMode":      string(mode),
+	})
 }

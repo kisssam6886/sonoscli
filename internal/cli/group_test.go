@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -66,6 +67,9 @@ func TestResolveMemberFuzzyAmbiguous(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error")
 	}
+	if code := errorCode(err); code != errCodeTargetAmbiguous {
+		t.Fatalf("code = %q, want %q", code, errCodeTargetAmbiguous)
+	}
 	msg := err.Error()
 	if !strings.Contains(msg, "ambiguous") {
 		t.Fatalf("unexpected error: %s", msg)
@@ -75,8 +79,24 @@ func TestResolveMemberFuzzyAmbiguous(t *testing.T) {
 	}
 }
 
+func TestResolveMemberNameNotFound(t *testing.T) {
+	top := sonos.Topology{
+		ByName: map[string]sonos.Member{
+			"Office": {Name: "Office", IP: "192.168.1.10"},
+		},
+	}
+
+	_, err := resolveMember(top, "Kitchen", "")
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if code := errorCode(err); code != errCodeTargetNotFound {
+		t.Fatalf("code = %q, want %q", code, errCodeTargetNotFound)
+	}
+}
+
 func TestGroupJoinByName(t *testing.T) {
-	flags := &rootFlags{Name: "Bedroom", Timeout: 2 * time.Second}
+	flags := &rootFlags{Name: "Bedroom", Timeout: 2 * time.Second, Format: formatJSON}
 	cmd := newGroupJoinCmd(flags)
 
 	top := sonos.Topology{
@@ -138,8 +158,9 @@ func TestGroupJoinByName(t *testing.T) {
 	}
 
 	cmd.SetArgs([]string{"--to", "Kitchen"})
-	cmd.SetOut(newDiscardWriter())
-	cmd.SetErr(newDiscardWriter())
+	var out captureWriter
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
 	cmd.SilenceErrors = true
 	cmd.SilenceUsage = true
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
@@ -150,6 +171,9 @@ func TestGroupJoinByName(t *testing.T) {
 	}
 	if fakeClient.joinedUUID != "RINCON_LR1400" {
 		t.Fatalf("unexpected coordinator uuid: %q", fakeClient.joinedUUID)
+	}
+	if !strings.Contains(out.String(), "\"action\": \"group.join\"") || !strings.Contains(out.String(), "\"capability\": \"group\"") || !strings.Contains(out.String(), "\"operation\": \"join\"") {
+		t.Fatalf("unexpected output: %s", out.String())
 	}
 }
 
@@ -170,7 +194,7 @@ func (r *recordingGroupingClient) LeaveGroup(ctx context.Context) error {
 }
 
 func TestGroupPartyJoinsAllNonDestinationMembers(t *testing.T) {
-	flags := &rootFlags{Timeout: 2 * time.Second}
+	flags := &rootFlags{Timeout: 2 * time.Second, Format: formatJSON}
 	cmd := newGroupPartyCmd(flags)
 
 	top := sonos.Topology{
@@ -234,8 +258,9 @@ func TestGroupPartyJoinsAllNonDestinationMembers(t *testing.T) {
 	}
 
 	cmd.SetArgs([]string{"--to", "Bar"})
-	cmd.SetOut(newDiscardWriter())
-	cmd.SetErr(newDiscardWriter())
+	var out captureWriter
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
 	cmd.SilenceErrors = true
 	cmd.SilenceUsage = true
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
@@ -248,10 +273,13 @@ func TestGroupPartyJoinsAllNonDestinationMembers(t *testing.T) {
 	if joined[0] != "192.168.1.20->RINCON_BAR1400" {
 		t.Fatalf("unexpected join operation: %s", joined[0])
 	}
+	if !strings.Contains(out.String(), "\"action\": \"group.party\"") || !strings.Contains(out.String(), "\"capability\": \"group\"") || !strings.Contains(out.String(), "\"operation\": \"party\"") {
+		t.Fatalf("unexpected output: %s", out.String())
+	}
 }
 
 func TestGroupDissolveLeavesAllMembersCoordinatorLast(t *testing.T) {
-	flags := &rootFlags{Name: "Office", Timeout: 2 * time.Second}
+	flags := &rootFlags{Name: "Office", Timeout: 2 * time.Second, Format: formatJSON}
 	cmd := newGroupDissolveCmd(flags)
 
 	top := sonos.Topology{
@@ -299,8 +327,9 @@ func TestGroupDissolveLeavesAllMembersCoordinatorLast(t *testing.T) {
 	}
 
 	cmd.SetArgs([]string{})
-	cmd.SetOut(newDiscardWriter())
-	cmd.SetErr(newDiscardWriter())
+	var out captureWriter
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
 	cmd.SilenceErrors = true
 	cmd.SilenceUsage = true
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
@@ -313,10 +342,13 @@ func TestGroupDissolveLeavesAllMembersCoordinatorLast(t *testing.T) {
 	if left[0] != "192.168.1.20" || left[1] != "192.168.1.10" {
 		t.Fatalf("expected coordinator last; got: %#v", left)
 	}
+	if !strings.Contains(out.String(), "\"action\": \"group.dissolve\"") || !strings.Contains(out.String(), "\"capability\": \"group\"") || !strings.Contains(out.String(), "\"operation\": \"dissolve\"") {
+		t.Fatalf("unexpected output: %s", out.String())
+	}
 }
 
 func TestGroupUnjoinByIP(t *testing.T) {
-	flags := &rootFlags{IP: "192.168.1.11", Timeout: 2 * time.Second}
+	flags := &rootFlags{IP: "192.168.1.11", Timeout: 2 * time.Second, Format: formatJSON}
 	cmd := newGroupUnjoinCmd(flags)
 
 	top := sonos.Topology{
@@ -344,8 +376,9 @@ func TestGroupUnjoinByIP(t *testing.T) {
 	}
 
 	cmd.SetArgs([]string{})
-	cmd.SetOut(newDiscardWriter())
-	cmd.SetErr(newDiscardWriter())
+	var out captureWriter
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
 	cmd.SilenceErrors = true
 	cmd.SilenceUsage = true
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
@@ -353,6 +386,9 @@ func TestGroupUnjoinByIP(t *testing.T) {
 	}
 	if fakeClient.leaveCalls != 1 {
 		t.Fatalf("expected 1 leave call, got %d", fakeClient.leaveCalls)
+	}
+	if !strings.Contains(out.String(), "\"action\": \"group.unjoin\"") || !strings.Contains(out.String(), "\"capability\": \"group\"") || !strings.Contains(out.String(), "\"operation\": \"unjoin\"") {
+		t.Fatalf("unexpected output: %s", out.String())
 	}
 }
 
@@ -364,8 +400,12 @@ func TestGroupJoinRequiresTo(t *testing.T) {
 	cmd.SetErr(newDiscardWriter())
 	cmd.SilenceErrors = true
 	cmd.SilenceUsage = true
-	if err := cmd.ExecuteContext(context.Background()); err == nil {
+	err := cmd.ExecuteContext(context.Background())
+	if err == nil {
 		t.Fatalf("expected error")
+	}
+	if code := errorCode(err); code != errCodeInvalidArgument {
+		t.Fatalf("code = %q, want %q", code, errCodeInvalidArgument)
 	}
 }
 
@@ -389,7 +429,7 @@ func TestGroupStatusJSON(t *testing.T) {
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(out.String(), "\"id\": \"G1\"") {
+	if !strings.Contains(out.String(), "\"action\": \"group.status\"") || !strings.Contains(out.String(), "\"capability\": \"group\"") || !strings.Contains(out.String(), "\"operation\": \"status\"") || !strings.Contains(out.String(), "\"id\": \"G1\"") {
 		t.Fatalf("unexpected output: %s", out.String())
 	}
 }
@@ -560,7 +600,91 @@ func TestGroupSoloLeavesOthersThenTarget(t *testing.T) {
 	if len(left) != 2 || left[0] != "192.168.1.10" || left[1] != "192.168.1.20" {
 		t.Fatalf("unexpected leave order: %#v", left)
 	}
-	if !strings.Contains(out.String(), "\"target\"") {
+	if !strings.Contains(out.String(), "\"action\": \"group.solo\"") || !strings.Contains(out.String(), "\"capability\": \"group\"") || !strings.Contains(out.String(), "\"operation\": \"solo\"") || !strings.Contains(out.String(), "\"target\"") {
 		t.Fatalf("expected json output, got: %s", out.String())
+	}
+}
+
+func TestGroupSoloPartialFailureIncludesStructuredDetails(t *testing.T) {
+	flags := &rootFlags{Name: "Office", Timeout: 2 * time.Second}
+	cmd := newGroupSoloCmd(flags)
+
+	top := sonos.Topology{
+		Groups: []sonos.Group{
+			{
+				ID: "G1",
+				Coordinator: sonos.Member{
+					Name:          "Bar",
+					IP:            "192.168.1.10",
+					UUID:          "RINCON_BAR1400",
+					IsCoordinator: true,
+					IsVisible:     true,
+				},
+				Members: []sonos.Member{
+					{Name: "Bar", IP: "192.168.1.10", UUID: "RINCON_BAR1400", IsCoordinator: true, IsVisible: true},
+					{Name: "Office", IP: "192.168.1.20", UUID: "RINCON_OFF1400", IsVisible: true},
+				},
+			},
+		},
+		ByName: map[string]sonos.Member{
+			"Bar":    {Name: "Bar", IP: "192.168.1.10", UUID: "RINCON_BAR1400"},
+			"Office": {Name: "Office", IP: "192.168.1.20", UUID: "RINCON_OFF1400"},
+		},
+		ByIP: map[string]sonos.Member{
+			"192.168.1.10": {Name: "Bar", IP: "192.168.1.10", UUID: "RINCON_BAR1400"},
+			"192.168.1.20": {Name: "Office", IP: "192.168.1.20", UUID: "RINCON_OFF1400"},
+		},
+	}
+
+	origTG := newTopologyGetter
+	origGC := newGroupingClient
+	t.Cleanup(func() {
+		newTopologyGetter = origTG
+		newGroupingClient = origGC
+	})
+	newTopologyGetter = func(ctx context.Context, timeout time.Duration) (topologyGetter, error) {
+		return &fakeTopologyGetter{top: top}, nil
+	}
+	newGroupingClient = func(ip string, timeout time.Duration) groupingClient {
+		if ip == "192.168.1.10" {
+			return &fakeGroupingClient{leaveErr: errors.New("upnp 701")}
+		}
+		return &fakeGroupingClient{}
+	}
+
+	cmd.SetOut(newDiscardWriter())
+	cmd.SetErr(newDiscardWriter())
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+
+	err := cmd.ExecuteContext(context.Background())
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if code := errorCode(err); code != errCodePartialFailure {
+		t.Fatalf("code = %q, want %q", code, errCodePartialFailure)
+	}
+
+	env := buildCLIErrorEnvelope(err)
+	if env.Error.Code != errCodePartialFailure {
+		t.Fatalf("envelope code = %q, want %q", env.Error.Code, errCodePartialFailure)
+	}
+	if env.Error.Details["action"] != "group.solo" {
+		t.Fatalf("expected action detail, got %#v", env.Error.Details)
+	}
+	if env.Error.Details["failed"] != 1 {
+		t.Fatalf("expected failed=1, got %#v", env.Error.Details)
+	}
+
+	results, ok := env.Error.Details["results"].([]groupOpResult)
+	if !ok || len(results) != 2 {
+		t.Fatalf("expected 2 results, got %#v", env.Error.Details["results"])
+	}
+	failures, ok := env.Error.Details["failures"].([]groupOpFailure)
+	if !ok || len(failures) != 1 {
+		t.Fatalf("expected 1 failure, got %#v", env.Error.Details["failures"])
+	}
+	if failures[0].Target != "Bar" {
+		t.Fatalf("unexpected failure target: %#v", failures[0])
 	}
 }

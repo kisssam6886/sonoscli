@@ -249,7 +249,15 @@ func newSMAPIAuthBeginCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			if isJSON(flags) {
-				return writeJSON(cmd, map[string]any{
+				return writeExecutionOK(cmd, flags, "auth.smapi.begin", newExecutionOutput("auth.smapi", "begin", executionTargetFromFlags(flags), map[string]any{
+					"service": spotifyServiceExecutionFields(svc),
+				}, map[string]any{
+					"speakerIP":  speaker.IP,
+					"service":    spotifyServiceExecutionFields(svc),
+					"linkCode":   res.LinkCode,
+					"regURL":     res.RegURL,
+					"linkDevice": res.LinkDeviceID,
+				}), map[string]any{
 					"speakerIP": speaker.IP,
 					"service":   svc,
 					"auth":      res,
@@ -341,7 +349,18 @@ func newSMAPIAuthCompleteCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			if isJSON(flags) {
-				return writeJSON(cmd, map[string]any{
+				return writeExecutionOK(cmd, flags, "auth.smapi.complete", newExecutionOutput("auth.smapi", "complete", executionTargetFromFlags(flags), map[string]any{
+					"service":      spotifyServiceExecutionFields(svc),
+					"code":         linkCode,
+					"linkDeviceID": linkDeviceID,
+					"wait":         wait.String(),
+				}, map[string]any{
+					"speakerIP":  speaker.IP,
+					"service":    spotifyServiceExecutionFields(svc),
+					"updatedAt":  pair.UpdatedAt,
+					"authToken":  pair.AuthToken,
+					"privateKey": pair.PrivateKey,
+				}), map[string]any{
 					"speakerIP": speaker.IP,
 					"service":   svc,
 					"token":     pair,

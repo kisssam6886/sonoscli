@@ -94,6 +94,9 @@ func TestDiscoverJSONOutput(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	s := out.String()
+	if !strings.Contains(s, "\"action\": \"discover\"") || !strings.Contains(s, "\"capability\": \"discover\"") || !strings.Contains(s, "\"operation\": \"scan\"") {
+		t.Fatalf("missing execution envelope: %s", s)
+	}
 	if !strings.Contains(s, "\"name\": \"Bar\"") || !strings.Contains(s, "\"name\": \"Kitchen\"") {
 		t.Fatalf("unexpected json output: %s", s)
 	}
@@ -122,6 +125,9 @@ func TestDiscoverNoDevicesPlainErrors(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error")
 	}
+	if code := errorCode(err); code != errCodeTargetNotFound {
+		t.Fatalf("code = %q, want %q", code, errCodeTargetNotFound)
+	}
 	if !strings.Contains(err.Error(), "no speakers found") {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -146,7 +152,7 @@ func TestDiscoverNoDevicesJSONOutputsEmptyArray(t *testing.T) {
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if strings.TrimSpace(out.String()) != "[]" {
+	if !strings.Contains(out.String(), "\"action\": \"discover\"") || !strings.Contains(out.String(), "\"count\": 0") || !strings.Contains(out.String(), "\"items\": []") {
 		t.Fatalf("unexpected output: %q", out.String())
 	}
 }

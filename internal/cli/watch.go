@@ -149,7 +149,17 @@ func newWatchCmd(flags *rootFlags) *cobra.Command {
 					return nil
 				case ev := <-events:
 					if isJSON(flags) {
-						_ = writeJSONLine(cmd, ev)
+						_ = writeJSONLine(cmd, executionJSONLine("watch.event", newExecutionOutput("watch", "event", executionTargetFromFlags(flags), nil, map[string]any{
+							"service": ev.Service,
+							"sid":     ev.SID,
+							"seq":     ev.Seq,
+						}), map[string]any{
+							"time":    ev.Time,
+							"service": ev.Service,
+							"sid":     ev.SID,
+							"seq":     ev.Seq,
+							"vars":    ev.Vars,
+						}))
 						continue
 					}
 					if isTSV(flags) {

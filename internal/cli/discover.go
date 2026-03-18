@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"sort"
 
@@ -39,15 +38,31 @@ func newDiscoverCmd(flags *rootFlags) *cobra.Command {
 			})
 
 			if len(devices) == 0 {
-				// JSON output has a sensible empty representation (`[]`) for scripts.
 				if isJSON(flags) {
-					return writeJSON(cmd, devices)
+					return writeExecutionOK(cmd, flags, "discover", newExecutionOutput("discover", "scan", nil, map[string]any{
+						"all": all,
+					}, map[string]any{
+						"count": 0,
+					}), map[string]any{
+						"items": devices,
+						"count": 0,
+					})
 				}
-				return errors.New("no speakers found (try increasing --timeout)")
+				return newTargetNotFoundError("no speakers found (try increasing --timeout)", flags, map[string]any{
+					"action":     "discover",
+					"resolution": "discover",
+				})
 			}
 
 			if isJSON(flags) {
-				return writeJSON(cmd, devices)
+				return writeExecutionOK(cmd, flags, "discover", newExecutionOutput("discover", "scan", nil, map[string]any{
+					"all": all,
+				}, map[string]any{
+					"count": len(devices),
+				}), map[string]any{
+					"items": devices,
+					"count": len(devices),
+				})
 			}
 
 			for _, d := range devices {

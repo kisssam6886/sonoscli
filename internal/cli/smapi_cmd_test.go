@@ -436,6 +436,9 @@ func TestAuthSMAPI_BeginAndCompleteWithWait(t *testing.T) {
 	if err != nil {
 		t.Fatalf("auth begin: %v", err)
 	}
+	if !strings.Contains(out, "\"action\": \"auth.smapi.begin\"") || !strings.Contains(out, "\"capability\": \"auth.smapi\"") || !strings.Contains(out, "\"operation\": \"begin\"") {
+		t.Fatalf("unexpected output: %q", out)
+	}
 	if !strings.Contains(out, "\"linkCode\"") || !strings.Contains(out, "ABCD") {
 		t.Fatalf("unexpected output: %q", out)
 	}
@@ -444,6 +447,9 @@ func TestAuthSMAPI_BeginAndCompleteWithWait(t *testing.T) {
 	out2, err := execute(t, newSMAPIAuthCompleteCmd(flagsComplete), "--service", "Spotify", "--code", "ABCD", "--wait", "60ms")
 	if err != nil {
 		t.Fatalf("auth complete: %v", err)
+	}
+	if !strings.Contains(out2, "\"action\": \"auth.smapi.complete\"") || !strings.Contains(out2, "\"capability\": \"auth.smapi\"") || !strings.Contains(out2, "\"operation\": \"complete\"") {
+		t.Fatalf("unexpected output: %q", out2)
 	}
 	if !strings.Contains(out2, "\"token\"") || !strings.Contains(out2, "\"authToken\"") {
 		t.Fatalf("unexpected output: %q", out2)

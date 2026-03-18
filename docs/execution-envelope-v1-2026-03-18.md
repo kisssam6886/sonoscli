@@ -113,6 +113,22 @@ JSON 模式下，这三类命令会额外返回：
 - `queue play`
 - `queue remove`
 
+### `discover`
+- `discover`
+
+### `config`
+- `config path`
+- `config get`
+- `config set`
+- `config unset`
+
+### `watch`
+- `watch`（JSON line event）
+
+### `auth.smapi`
+- `auth smapi begin`
+- `auth smapi complete`
+
 ### `transport`
 - `play`
 - `pause`
@@ -202,7 +218,7 @@ JSON 模式下，这三类命令会额外返回：
 
 后续建议按这个顺序继续收口：
 
-1. `discover` / `doctor` / `group` / `watch` / `config` 等剩余入口接入同一层 `execution`
+1. `group` / `doctor` 等剩余运维入口接入同一层 `execution`
 2. 定义正式 request schema：
    - `target`
    - `service`

@@ -230,3 +230,19 @@ JSON 模式下，这三类命令会额外返回：
    - `reliability`
    - `feedback`
 2. 再考虑是否增加一个统一 `execute` 入口
+
+---
+
+## 8) 配套正式文档
+
+截至 2026-03-19，这条 execution envelope 现在已经有配套正式说明：
+
+1. `docs/schema-request-v1.md`
+2. `docs/schema-response-v1.md`
+3. `docs/schema-errors-v1.md`
+
+说明：
+
+1. `request` 文档以当前已经落地的 `execution.target + execution.request` 为准
+2. `response` 文档明确区分了标准成功响应、JSON line 事件、以及 `doctor` 特例
+3. `errors` 文档冻结了当前真实存在的 `ERR_*` 错误码，而不是未来草案码表

@@ -517,18 +517,7 @@ func newSMAPISearchCmd(flags *rootFlags) *cobra.Command {
 					return fmt.Errorf("--index %d out of range (got %d results)", index, len(flat))
 				}
 				selected := flat[index-1]
-				ref := selected.ID
-				if _, ok := sonos.ParseSpotifyRef(ref); !ok {
-					return errors.New("selected result is not a supported Spotify ref: " + ref)
-				}
-				c, err := newSonosEnqueuer(ctx, flags)
-				if err != nil {
-					return err
-				}
-				_, err = c.EnqueueSpotify(ctx, ref, sonos.EnqueueOptions{
-					PlayNow: doOpen,
-				})
-				if err != nil {
+				if err := openOrEnqueueSMAPIItem(ctx, flags, svc, selected, doOpen); err != nil {
 					return err
 				}
 			}
@@ -646,18 +635,7 @@ func newSMAPIBrowseCmd(flags *rootFlags) *cobra.Command {
 					return fmt.Errorf("--index %d out of range (got %d results)", index, len(flat))
 				}
 				selected := flat[index-1]
-				ref := selected.ID
-				if _, ok := sonos.ParseSpotifyRef(ref); !ok {
-					return errors.New("selected result is not a supported Spotify ref: " + ref)
-				}
-				c, err := newSonosEnqueuer(ctx, flags)
-				if err != nil {
-					return err
-				}
-				_, err = c.EnqueueSpotify(ctx, ref, sonos.EnqueueOptions{
-					PlayNow: doOpen,
-				})
-				if err != nil {
+				if err := openOrEnqueueSMAPIItem(ctx, flags, svc, selected, doOpen); err != nil {
 					return err
 				}
 			}
@@ -705,4 +683,59 @@ func newSMAPIBrowseCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().IntVar(&index, "index", 1, "Which result to use with --open/--enqueue (1-based)")
 
 	return cmd
+}
+
+func openOrEnqueueSMAPIItem(ctx context.Context, flags *rootFlags, svc sonos.MusicServiceDescriptor, selected sonos.SMAPIItem, playNow bool) error {
+	ref := strings.TrimSpace(selected.ID)
+	if ref == "" {
+		return errors.New("selected result has empty id")
+	}
+
+	if _, ok := sonos.ParseSpotifyRef(ref); ok {
+		c, err := newSonosEnqueuer(ctx, flags)
+		if err != nil {
+			return err
+		}
+		_, err = c.EnqueueSpotify(ctx, ref, sonos.EnqueueOptions{PlayNow: playNow})
+		return err
+	}
+
+	// NetEase SMAPI track support (service id 165): queue native track uri instead of direct play-uri.
+	if strings.EqualFold(strings.TrimSpace(svc.ID), "165") {
+		id := strings.ToUpper(ref)
+		if strings.HasPrefix(id, "SONG:") {
+			c, err := coordinatorClient(ctx, flags)
+			if err != nil {
+				return err
+			}
+			uri := buildNCMTrackURI(ref)
+			meta := buildNCMQueueTrackMeta(smapiLikeItem{
+				ID:     ref,
+				Title:  selected.Title,
+				Artist: selected.TrackMetadata.Artist,
+				Album:  selected.TrackMetadata.Album,
+			})
+			pos, err := c.AddURIToQueue(ctx, uri, meta, 0, false)
+			if err != nil {
+				return err
+			}
+			if !playNow {
+				return nil
+			}
+			if pos <= 0 {
+				pos = 1
+			}
+			if err := c.PlayQueuePosition(ctx, pos); err != nil {
+				return err
+			}
+			_ = c.Play(ctx)
+			if ti, err := c.GetTransportInfo(ctx); err == nil && strings.EqualFold(strings.TrimSpace(ti.State), "TRANSITIONING") {
+				time.Sleep(1200 * time.Millisecond)
+				_ = c.Play(ctx)
+			}
+			return nil
+		}
+	}
+
+	return fmt.Errorf("selected result is not auto-playable for service %q: %s", strings.TrimSpace(svc.Name), ref)
 }

@@ -123,6 +123,8 @@ func newRootCmd() (*cobra.Command, *rootFlags, error) {
 	rootCmd.AddCommand(newVolumeCmd(flags))
 	rootCmd.AddCommand(newMuteCmd(flags))
 	rootCmd.AddCommand(newModeCmd(flags))
+	rootCmd.AddCommand(newSayCmd(flags))
+	rootCmd.AddCommand(newScheduleCmd(flags))
 	rootCmd.AddCommand(newWatchCmd(flags))
 
 	return rootCmd, flags, nil

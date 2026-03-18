@@ -30,6 +30,46 @@ type statusOutput struct {
 	Mute        bool                `json:"mute"`
 }
 
+func statusExecutionResult(out statusOutput) map[string]any {
+	result := map[string]any{
+		"speaker":  out.Device.Name,
+		"ip":       out.Device.IP,
+		"state":    out.Transport.State,
+		"track":    out.Position.Track,
+		"uri":      out.Position.TrackURI,
+		"time":     out.Position.RelTime,
+		"duration": out.Position.TrackDuration,
+		"volume":   out.Volume,
+		"mute":     out.Mute,
+	}
+	if out.NowPlaying != nil {
+		result["title"] = out.NowPlaying.Title
+		result["artist"] = out.NowPlaying.Artist
+		result["album"] = out.NowPlaying.Album
+	}
+	if out.AlbumArtURL != "" {
+		result["albumArtURL"] = out.AlbumArtURL
+	}
+	return compactMap(result)
+}
+
+func statusExecutionExtra(out statusOutput) map[string]any {
+	extra := map[string]any{
+		"device":    out.Device,
+		"transport": out.Transport,
+		"position":  out.Position,
+		"volume":    out.Volume,
+		"mute":      out.Mute,
+	}
+	if out.NowPlaying != nil {
+		extra["nowPlaying"] = out.NowPlaying
+	}
+	if out.AlbumArtURL != "" {
+		extra["albumArtURL"] = out.AlbumArtURL
+	}
+	return extra
+}
+
 func newStatusCmd(flags *rootFlags) *cobra.Command {
 	return &cobra.Command{
 		Use:          "status",
@@ -71,7 +111,7 @@ func newStatusCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			if isJSON(flags) {
-				return writeJSON(cmd, out)
+				return writeExecutionOK(cmd, flags, "status", newExecutionOutput("transport.status", "get", executionTargetFromFlags(flags), nil, statusExecutionResult(out)), statusExecutionExtra(out))
 			}
 
 			if isTSV(flags) {

@@ -80,6 +80,9 @@ func TestSearchSpotify_JSONOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if !strings.Contains(out, "\"action\": \"search.spotify\"") || !strings.Contains(out, "\"capability\": \"music.spotify\"") || !strings.Contains(out, "\"operation\": \"search\"") {
+		t.Fatalf("missing execution envelope: %s", out)
+	}
 	if !strings.Contains(out, "\"uri\": \"spotify:track:t1\"") {
 		t.Fatalf("unexpected output: %s", out)
 	}
@@ -181,5 +184,41 @@ func TestSearchSpotify_EnqueueCallsSonos(t *testing.T) {
 	}
 	if fakeSonos.lastOpts.PlayNow {
 		t.Fatalf("expected PlayNow false")
+	}
+}
+
+func TestSearchSpotify_OpenJSONIncludesExecutionEnvelope(t *testing.T) {
+	flags := &rootFlags{Timeout: 2, Name: "Kitchen", Format: formatJSON}
+	cmd := newSearchSpotifyCmd(flags)
+
+	origS := newSpotifySearcher
+	origC := newSonosEnqueuer
+	t.Cleanup(func() {
+		newSpotifySearcher = origS
+		newSonosEnqueuer = origC
+	})
+
+	newSpotifySearcher = func(flags *rootFlags, clientID, clientSecret string) (spotifySearcher, error) {
+		return &fakeSpotifySearcher{results: []spotify.Result{
+			{Type: spotify.TypeTrack, ID: "t1", URI: "spotify:track:t1", Title: "Song 1", Subtitle: "Artist"},
+		}}, nil
+	}
+	fakeSonos := &fakeSonosEnqueuer{}
+	newSonosEnqueuer = func(ctx context.Context, flags *rootFlags) (sonosEnqueuer, error) {
+		return fakeSonos, nil
+	}
+
+	out, err := execute(t, cmd, "--open", "hello")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "\"action\": \"search.spotify\"") || !strings.Contains(out, "\"capability\": \"music.spotify\"") || !strings.Contains(out, "\"operation\": \"search_open\"") {
+		t.Fatalf("missing execution envelope: %s", out)
+	}
+	if !strings.Contains(out, "\"selectionAction\": \"open\"") || !strings.Contains(out, "\"selected\"") {
+		t.Fatalf("unexpected output: %s", out)
+	}
+	if fakeSonos.calls != 1 {
+		t.Fatalf("expected 1 enqueue call, got %d", fakeSonos.calls)
 	}
 }

@@ -120,6 +120,9 @@ JSON 模式下，这三类命令会额外返回：
 - `next`
 - `prev`
 
+### `transport.status`
+- `status`
+
 ### `transport.mode`
 - `mode get`
 - `mode shuffle`
@@ -133,6 +136,16 @@ JSON 模式下，这三类命令会额外返回：
 - `linein`
 - `tv`
 - `music`
+
+### `transport.volume`
+- `volume get`
+- `volume set`
+
+### `transport.mute`
+- `mute get`
+- `mute on`
+- `mute off`
+- `mute toggle`
 
 ### `favorites`
 - `favorites list`
@@ -150,6 +163,7 @@ JSON 模式下，这三类命令会额外返回：
 - `open`
 - `enqueue`
 - `play spotify`
+- `search spotify`
 
 ---
 
@@ -188,7 +202,7 @@ JSON 模式下，这三类命令会额外返回：
 
 后续建议按这个顺序继续收口：
 
-1. `status` / `volume` / `mute` / `search spotify` 等剩余高频入口接入同一层 `execution`
+1. `discover` / `doctor` / `group` / `watch` / `config` 等剩余入口接入同一层 `execution`
 2. 定义正式 request schema：
    - `target`
    - `service`

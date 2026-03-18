@@ -138,6 +138,9 @@ func TestStatusJSONIncludesNowPlaying(t *testing.T) {
 	}
 
 	s := out.String()
+	if !strings.Contains(s, "\"action\": \"status\"") || !strings.Contains(s, "\"capability\": \"transport.status\"") || !strings.Contains(s, "\"operation\": \"get\"") {
+		t.Fatalf("missing execution envelope: %s", s)
+	}
 	if !strings.Contains(s, "\"nowPlaying\"") {
 		t.Fatalf("missing nowPlaying: %s", s)
 	}

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steipete/sonoscli/internal/sonos"
 )
 
 type scheduleItem struct {
@@ -31,13 +33,14 @@ type scheduleFile struct {
 func newScheduleCmd(flags *rootFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "schedule",
-		Short: "Manage Sonos schedules (MVP local store)",
-		Long:  "MVP for sonos schedule. This command stores schedule definitions locally for planning/integration. Runtime execution worker will be added in next phase.",
+		Short: "Manage Sonos schedules (MVP local store + manual runner)",
+		Long:  "MVP for sonos schedule. Stores schedule definitions locally and can manually run due jobs.",
 	}
 
 	cmd.AddCommand(newScheduleListCmd(flags))
 	cmd.AddCommand(newScheduleAddCmd(flags))
 	cmd.AddCommand(newScheduleRemoveCmd(flags))
+	cmd.AddCommand(newScheduleRunCmd(flags))
 	return cmd
 }
 
@@ -79,7 +82,7 @@ func newScheduleAddCmd(flags *rootFlags) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			action = strings.TrimSpace(strings.ToLower(action))
 			switch action {
-			case "say", "play", "mode", "tv", "music", "scene":
+			case "say", "play", "mode", "tv", "music":
 			default:
 				return fmt.Errorf("unsupported --action: %s", action)
 			}
@@ -118,7 +121,7 @@ func newScheduleAddCmd(flags *rootFlags) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&name, "name", "", "Human friendly schedule name")
-	cmd.Flags().StringVar(&action, "action", "", "Action: say|play|mode|tv|music|scene")
+	cmd.Flags().StringVar(&action, "action", "", "Action: say|play|mode|tv|music")
 	cmd.Flags().StringVar(&payload, "payload", "", "Action payload (free text / serialized args)")
 	cmd.Flags().StringVar(&at, "at", "", "Execution time (RFC3339), e.g. 2026-03-20T09:30:00+08:00")
 	_ = cmd.MarkFlagRequired("action")
@@ -155,6 +158,155 @@ func newScheduleRemoveCmd(flags *rootFlags) *cobra.Command {
 			}
 			return writeOK(cmd, flags, "schedule.remove", map[string]any{"id": id})
 		},
+	}
+}
+
+func newScheduleRunCmd(flags *rootFlags) *cobra.Command {
+	var id string
+	cmd := &cobra.Command{
+		Use:   "run",
+		Short: "Run due schedule items now",
+		Long:  "Execute due schedule items from local schedule store. Use --id to run one specific item.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			f, err := loadScheduleFile()
+			if err != nil {
+				return err
+			}
+			now := time.Now()
+			runItems := make([]scheduleItem, 0)
+			keepItems := make([]scheduleItem, 0, len(f.Items))
+			id = strings.TrimSpace(id)
+			for _, it := range f.Items {
+				if id != "" {
+					if it.ID == id {
+						runItems = append(runItems, it)
+					} else {
+						keepItems = append(keepItems, it)
+					}
+					continue
+				}
+				if !it.At.After(now) {
+					runItems = append(runItems, it)
+				} else {
+					keepItems = append(keepItems, it)
+				}
+			}
+			if len(runItems) == 0 {
+				if isJSON(flags) {
+					return writeJSON(cmd, map[string]any{"ok": true, "ran": 0})
+				}
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No due schedules to run.")
+				return nil
+			}
+
+			results := make([]map[string]any, 0, len(runItems))
+			for _, it := range runItems {
+				err := executeScheduleItem(cmd, flags, it)
+				if err != nil {
+					results = append(results, map[string]any{"id": it.ID, "ok": false, "error": err.Error()})
+					keepItems = append(keepItems, it)
+					continue
+				}
+				results = append(results, map[string]any{"id": it.ID, "ok": true})
+			}
+			f.Items = keepItems
+			if err := saveScheduleFile(f); err != nil {
+				return err
+			}
+
+			if isJSON(flags) {
+				return writeJSON(cmd, map[string]any{"ok": true, "results": results, "remaining": len(keepItems)})
+			}
+			for _, r := range results {
+				if r["ok"] == true {
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "ran: %s\n", r["id"])
+				} else {
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "failed: %s (%s)\n", r["id"], r["error"])
+				}
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&id, "id", "", "Run only this schedule id")
+	return cmd
+}
+
+func executeScheduleItem(cmd *cobra.Command, flags *rootFlags, it scheduleItem) error {
+	f := *flags
+	if strings.TrimSpace(it.Room) != "" {
+		f.Name = strings.TrimSpace(it.Room)
+	}
+	ctx := cmd.Context()
+	switch it.Action {
+	case "play":
+		c, err := coordinatorClient(ctx, &f)
+		if err != nil {
+			return err
+		}
+		return c.Play(ctx)
+	case "tv":
+		c, err := newSourceClient(ctx, &f)
+		if err != nil {
+			return err
+		}
+		mem, err := resolveTargetMember(ctx, &f)
+		if err != nil {
+			return err
+		}
+		uri := "x-sonos-htastream:" + mem.UUID + ":spdif"
+		if err := c.SetAVTransportURI(ctx, uri, ""); err != nil {
+			return err
+		}
+		return c.Play(ctx)
+	case "music":
+		c, err := newSourceClient(ctx, &f)
+		if err != nil {
+			return err
+		}
+		mem, err := resolveTargetMember(ctx, &f)
+		if err != nil {
+			return err
+		}
+		uri := "x-rincon-queue:" + mem.UUID + "#0"
+		if err := c.SetAVTransportURI(ctx, uri, ""); err != nil {
+			return err
+		}
+		return c.Play(ctx)
+	case "mode":
+		c, err := coordinatorClient(ctx, &f)
+		if err != nil {
+			return err
+		}
+		return applyMode(c, ctx, strings.TrimSpace(strings.ToLower(it.Payload)))
+	case "say":
+		c, err := coordinatorClient(ctx, &f)
+		if err != nil {
+			return err
+		}
+		uri := strings.TrimSpace(it.Payload)
+		if uri == "" {
+			return errors.New("say payload must be audio URI")
+		}
+		return c.PlayURI(ctx, uri, "")
+	default:
+		return fmt.Errorf("unsupported action: %s", it.Action)
+	}
+}
+
+func applyMode(c *sonos.Client, ctx context.Context, mode string) error {
+	switch mode {
+	case "shuffle":
+		return c.SetPlayMode(ctx, sonos.PlayModeShuffle)
+	case "shuffle-norepeat":
+		return c.SetPlayMode(ctx, sonos.PlayModeShuffleNoRepeat)
+	case "repeat":
+		return c.SetPlayMode(ctx, sonos.PlayModeRepeatAll)
+	case "repeat-one":
+		return c.SetPlayMode(ctx, sonos.PlayModeRepeatOne)
+	case "normal", "":
+		return c.SetPlayMode(ctx, sonos.PlayModeNormal)
+	default:
+		return fmt.Errorf("unsupported mode payload: %s", mode)
 	}
 }
 

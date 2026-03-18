@@ -23,7 +23,7 @@
 - **Scriptable output**: `--format plain|json|tsv` plus `--debug` tracing.
 - **sonoscli-plus extras**:
   - `mode get|shuffle|shuffle-norepeat|repeat|repeat-one|normal`
-  - `say <text> --audio-uri <url>` for TTS announcement playback (MVP)
+  - `say <text>` for TTS announcement playback (macOS auto-TTS), with `--lang zh|yue`, `--voice`, `--style`, or `--audio-uri <url>` override
   - `schedule add|list|remove|run|serve` for local schedule planning/execution (MVP)
   - `tv` / `music` for switching between TV input and Sonos music queue mode
   - `ncm categories|browse|search|play|lucky|auth ...` for 网易云音乐 via Sonos SMAPI

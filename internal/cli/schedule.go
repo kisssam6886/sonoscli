@@ -41,6 +41,7 @@ func newScheduleCmd(flags *rootFlags) *cobra.Command {
 	cmd.AddCommand(newScheduleAddCmd(flags))
 	cmd.AddCommand(newScheduleRemoveCmd(flags))
 	cmd.AddCommand(newScheduleRunCmd(flags))
+	cmd.AddCommand(newScheduleServeCmd(flags))
 	return cmd
 }
 
@@ -168,54 +169,19 @@ func newScheduleRunCmd(flags *rootFlags) *cobra.Command {
 		Short: "Run due schedule items now",
 		Long:  "Execute due schedule items from local schedule store. Use --id to run one specific item.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			f, err := loadScheduleFile()
+			results, remaining, err := runDueSchedules(cmd, flags, strings.TrimSpace(id), true)
 			if err != nil {
 				return err
 			}
-			now := time.Now()
-			runItems := make([]scheduleItem, 0)
-			keepItems := make([]scheduleItem, 0, len(f.Items))
-			id = strings.TrimSpace(id)
-			for _, it := range f.Items {
-				if id != "" {
-					if it.ID == id {
-						runItems = append(runItems, it)
-					} else {
-						keepItems = append(keepItems, it)
-					}
-					continue
-				}
-				if !it.At.After(now) {
-					runItems = append(runItems, it)
-				} else {
-					keepItems = append(keepItems, it)
-				}
-			}
-			if len(runItems) == 0 {
+			if len(results) == 0 {
 				if isJSON(flags) {
 					return writeJSON(cmd, map[string]any{"ok": true, "ran": 0})
 				}
 				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No due schedules to run.")
 				return nil
 			}
-
-			results := make([]map[string]any, 0, len(runItems))
-			for _, it := range runItems {
-				err := executeScheduleItem(cmd, flags, it)
-				if err != nil {
-					results = append(results, map[string]any{"id": it.ID, "ok": false, "error": err.Error()})
-					keepItems = append(keepItems, it)
-					continue
-				}
-				results = append(results, map[string]any{"id": it.ID, "ok": true})
-			}
-			f.Items = keepItems
-			if err := saveScheduleFile(f); err != nil {
-				return err
-			}
-
 			if isJSON(flags) {
-				return writeJSON(cmd, map[string]any{"ok": true, "results": results, "remaining": len(keepItems)})
+				return writeJSON(cmd, map[string]any{"ok": true, "results": results, "remaining": remaining})
 			}
 			for _, r := range results {
 				if r["ok"] == true {
@@ -229,6 +195,99 @@ func newScheduleRunCmd(flags *rootFlags) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&id, "id", "", "Run only this schedule id")
 	return cmd
+}
+
+func newScheduleServeCmd(flags *rootFlags) *cobra.Command {
+	var (
+		interval time.Duration
+		once     bool
+	)
+	cmd := &cobra.Command{
+		Use:   "serve",
+		Short: "Run schedule worker loop",
+		Long:  "Run a local loop that periodically executes due schedule items.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if interval <= 0 {
+				interval = 30 * time.Second
+			}
+			run := func() error {
+				results, remaining, err := runDueSchedules(cmd, flags, "", true)
+				if err != nil {
+					return err
+				}
+				if isJSON(flags) {
+					_ = writeJSONLine(cmd, map[string]any{"event": "tick", "time": time.Now().Format(time.RFC3339), "ran": len(results), "remaining": remaining})
+				} else if len(results) > 0 {
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "[%s] ran=%d remaining=%d\n", time.Now().Format(time.RFC3339), len(results), remaining)
+				}
+				return nil
+			}
+			if once {
+				return run()
+			}
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				if err := run(); err != nil {
+					if isJSON(flags) {
+						_ = writeJSONLine(cmd, map[string]any{"event": "error", "error": err.Error()})
+					} else {
+						_, _ = fmt.Fprintf(cmd.OutOrStdout(), "schedule serve error: %v\n", err)
+					}
+				}
+				select {
+				case <-cmd.Context().Done():
+					return cmd.Context().Err()
+				case <-ticker.C:
+				}
+			}
+		},
+	}
+	cmd.Flags().DurationVar(&interval, "interval", 30*time.Second, "Polling interval for due schedules")
+	cmd.Flags().BoolVar(&once, "once", false, "Run one tick then exit")
+	return cmd
+}
+
+func runDueSchedules(cmd *cobra.Command, flags *rootFlags, onlyID string, keepFailed bool) ([]map[string]any, int, error) {
+	f, err := loadScheduleFile()
+	if err != nil {
+		return nil, 0, err
+	}
+	now := time.Now()
+	runItems := make([]scheduleItem, 0)
+	keepItems := make([]scheduleItem, 0, len(f.Items))
+	for _, it := range f.Items {
+		if onlyID != "" {
+			if it.ID == onlyID {
+				runItems = append(runItems, it)
+			} else {
+				keepItems = append(keepItems, it)
+			}
+			continue
+		}
+		if !it.At.After(now) {
+			runItems = append(runItems, it)
+		} else {
+			keepItems = append(keepItems, it)
+		}
+	}
+	results := make([]map[string]any, 0, len(runItems))
+	for _, it := range runItems {
+		err := executeScheduleItem(cmd, flags, it)
+		if err != nil {
+			results = append(results, map[string]any{"id": it.ID, "ok": false, "error": err.Error()})
+			if keepFailed {
+				keepItems = append(keepItems, it)
+			}
+			continue
+		}
+		results = append(results, map[string]any{"id": it.ID, "ok": true})
+	}
+	f.Items = keepItems
+	if err := saveScheduleFile(f); err != nil {
+		return nil, 0, err
+	}
+	return results, len(keepItems), nil
 }
 
 func executeScheduleItem(cmd *cobra.Command, flags *rootFlags, it scheduleItem) error {

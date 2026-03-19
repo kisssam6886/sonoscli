@@ -33,7 +33,7 @@ func newSayCmd(flags *rootFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "say <text>",
 		Short: "Play a TTS announcement on Sonos",
-		Long:  "If --audio-uri is provided, play that URI. Otherwise on macOS, generate local TTS via `say` (with zh/yue voice defaults), host it briefly over local HTTP, and play on Sonos.",
+		Long:  "If --audio-uri is provided, play that URI. Otherwise on macOS, generate local TTS via `say` (with zh/yue voice defaults), transcode it to M4A, host it briefly over local HTTP, and play on Sonos.",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			text := strings.TrimSpace(strings.Join(args, " "))
@@ -163,7 +163,7 @@ func newSayCmd(flags *rootFlags) *cobra.Command {
 
 	cmd.Flags().StringVar(&audioURI, "audio-uri", "", "Publicly reachable TTS audio URL (skip local generation)")
 	cmd.Flags().StringVar(&title, "title", "", "Display title for radio-style playback")
-	cmd.Flags().BoolVar(&radio, "radio", true, "Force radio-style playback for HTTP stream URIs")
+	cmd.Flags().BoolVar(&radio, "radio", false, "Force radio-style playback (mainly for continuous stream URIs)")
 	cmd.Flags().IntVar(&tempVolume, "temp-volume", -1, "Temporarily set volume during announcement (0-100), then restore")
 	cmd.Flags().StringVar(&lang, "lang", "zh", "Language profile: zh|yue")
 	cmd.Flags().StringVar(&voice, "voice", "", "Voice override (macOS `say` voice name)")
@@ -190,14 +190,22 @@ func generateAndServeLocalTTS(ctx context.Context, sonosIP, text, lang, voice, s
 	if err != nil {
 		return "", "", nil, err
 	}
-	filename := "tts.aiff"
-	path := filepath.Join(tmpDir, filename)
+	inputName := "tts.aiff"
+	inputPath := filepath.Join(tmpDir, inputName)
+	outputName := "tts.m4a"
+	outputPath := filepath.Join(tmpDir, outputName)
 
-	cmd := exec.CommandContext(ctx, "say", "-v", selectedVoice, "-r", fmt.Sprintf("%d", rate), "-o", path, text)
+	cmd := exec.CommandContext(ctx, "say", "-v", selectedVoice, "-r", fmt.Sprintf("%d", rate), "-o", inputPath, text)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		_ = os.RemoveAll(tmpDir)
 		return "", "", nil, fmt.Errorf("macOS say failed: %v (%s)", err, strings.TrimSpace(string(out)))
+	}
+	transcode := exec.CommandContext(ctx, "afconvert", "-f", "m4af", "-d", "aac", inputPath, outputPath)
+	out, err = transcode.CombinedOutput()
+	if err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return "", "", nil, fmt.Errorf("local TTS transcode failed: %v (%s)", err, strings.TrimSpace(string(out)))
 	}
 
 	localIP, err := localReachableIPFor(sonosIP)
@@ -212,14 +220,14 @@ func generateAndServeLocalTTS(ctx context.Context, sonosIP, text, lang, voice, s
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/"+filename, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "audio/aiff")
-		http.ServeFile(w, r, path)
+	mux.HandleFunc("/"+outputName, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "audio/mp4")
+		http.ServeFile(w, r, outputPath)
 	})
 	srv := &http.Server{Handler: mux}
 	go func() { _ = srv.Serve(ln) }()
 
-	uri := fmt.Sprintf("http://%s/%s", ln.Addr().String(), filename)
+	uri := fmt.Sprintf("http://%s/%s", ln.Addr().String(), outputName)
 	cleanup := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -234,11 +242,11 @@ func generateAndServeLocalTTS(ctx context.Context, sonosIP, text, lang, voice, s
 func defaultVoiceFor(lang string) string {
 	switch strings.ToLower(strings.TrimSpace(lang)) {
 	case "yue", "cantonese", "zh-yue":
-		return "Sin-ji"
+		return "Sinji"
 	case "zh", "mandarin", "zh-cn":
-		return "Ting-Ting"
+		return "Tingting"
 	default:
-		return "Ting-Ting"
+		return "Tingting"
 	}
 }
 

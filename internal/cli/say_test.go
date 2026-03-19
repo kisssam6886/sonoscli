@@ -95,11 +95,11 @@ func TestSayCmd_AudioURIJSONIncludesExecutionEnvelopeAndRestoresVolume(t *testin
 	if playCalls != 1 {
 		t.Fatalf("expected Play once, got %d", playCalls)
 	}
-	if sawCurrentURI != "x-rincon-mp3radio://example.com/tts.aiff" {
+	if sawCurrentURI != "http://example.com/tts.aiff" {
 		t.Fatalf("unexpected CurrentURI: %q", sawCurrentURI)
 	}
-	if !strings.Contains(sawMeta, "测试广播") {
-		t.Fatalf("expected title in metadata, got %q", sawMeta)
+	if sawMeta != "" {
+		t.Fatalf("expected no radio metadata for direct-file playback, got %q", sawMeta)
 	}
 	if len(setVolumes) != 2 || setVolumes[0] != "20" || setVolumes[1] != "33" {
 		t.Fatalf("expected volume set to 20 then restore 33, got %#v", setVolumes)
@@ -190,13 +190,88 @@ func TestExecuteCmd_SayAnnounceWithAudioURI(t *testing.T) {
 	}
 }
 
+func TestSayCmd_AudioURICanForceRadioMode(t *testing.T) {
+	flags := &rootFlags{IP: "192.0.2.43", Timeout: 2 * time.Second, Format: formatJSON}
+	cmd := newSayCmd(flags)
+
+	var (
+		playCalls     int
+		sawCurrentURI string
+		sawMeta       string
+	)
+
+	rt := roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		action := r.Header.Get("SOAPACTION")
+		switch {
+		case strings.Contains(action, "ZoneGroupTopology:1#GetZoneGroupState"):
+			return httpResponseWithStatus(500, ""), nil
+		case strings.Contains(action, "AVTransport:1#SetAVTransportURI"):
+			body, _ := io.ReadAll(r.Body)
+			_ = r.Body.Close()
+			bodyStr := string(body)
+			if start := strings.Index(bodyStr, "<CurrentURI>"); start >= 0 {
+				start += len("<CurrentURI>")
+				if end := strings.Index(bodyStr, "</CurrentURI>"); end > start {
+					sawCurrentURI = bodyStr[start:end]
+				}
+			}
+			if start := strings.Index(bodyStr, "<CurrentURIMetaData>"); start >= 0 {
+				start += len("<CurrentURIMetaData>")
+				if end := strings.Index(bodyStr, "</CurrentURIMetaData>"); end > start {
+					sawMeta = bodyStr[start:end]
+				}
+			}
+			return httpResponseWithStatus(
+				200,
+				soapActionResponse("urn:schemas-upnp-org:service:AVTransport:1", "SetAVTransportURI", ``),
+			), nil
+		case strings.Contains(action, "AVTransport:1#Play"):
+			playCalls++
+			return httpResponseWithStatus(
+				200,
+				soapActionResponse("urn:schemas-upnp-org:service:AVTransport:1", "Play", ``),
+			), nil
+		default:
+			t.Fatalf("unexpected action: %q", action)
+			return nil, nil
+		}
+	})
+
+	oldNew := newSonosClient
+	t.Cleanup(func() { newSonosClient = oldNew })
+	newSonosClient = func(ip string, timeout time.Duration) *sonos.Client {
+		return &sonos.Client{
+			IP:   ip,
+			Port: 1400,
+			HTTP: &http.Client{Timeout: timeout, Transport: rt},
+		}
+	}
+
+	out, err := execute(t, cmd, "--audio-uri", "http://example.com/tts.aiff", "--radio", "--title", "测试广播", "--hold-seconds", "1", "你好，客厅")
+	if err != nil {
+		t.Fatalf("say audio-uri radio mode: %v", err)
+	}
+	if playCalls != 1 {
+		t.Fatalf("expected Play once, got %d", playCalls)
+	}
+	if sawCurrentURI != "x-rincon-mp3radio://example.com/tts.aiff" {
+		t.Fatalf("unexpected CurrentURI: %q", sawCurrentURI)
+	}
+	if !strings.Contains(sawMeta, "测试广播") {
+		t.Fatalf("expected radio metadata to include title, got %q", sawMeta)
+	}
+	if !strings.Contains(out, `"radio": true`) {
+		t.Fatalf("unexpected output: %s", out)
+	}
+}
+
 func TestSayDefaults_SelectVoiceAndRateByLanguageAndStyle(t *testing.T) {
 	t.Parallel()
 
-	if got := defaultVoiceFor("yue"); got != "Sin-ji" {
+	if got := defaultVoiceFor("yue"); got != "Sinji" {
 		t.Fatalf("defaultVoiceFor(yue) = %q", got)
 	}
-	if got := defaultVoiceFor("zh"); got != "Ting-Ting" {
+	if got := defaultVoiceFor("zh"); got != "Tingting" {
 		t.Fatalf("defaultVoiceFor(zh) = %q", got)
 	}
 	if got := defaultRateFor("warm"); got != 168 {

@@ -47,6 +47,16 @@ func TestSayCmd_AudioURIJSONIncludesExecutionEnvelopeAndRestoresVolume(t *testin
 	rt := roundTripperFunc(func(r *http.Request) (*http.Response, error) {
 		action := r.Header.Get("SOAPACTION")
 		switch {
+		case r.URL.Path == "/xml/device_description.xml" || action == "":
+			return httpResponseWithStatus(200, `<?xml version="1.0"?>
+<root>
+  <device>
+    <deviceType>urn:schemas-upnp-org:device:ZonePlayer:1</deviceType>
+    <manufacturer>Sonos, Inc.</manufacturer>
+    <roomName>Living Room</roomName>
+    <UDN>uuid:RINCON_ABC1400</UDN>
+  </device>
+</root>`), nil
 		case strings.Contains(action, "ZoneGroupTopology:1#GetZoneGroupState"):
 			return httpResponseWithStatus(500, ""), nil
 		case strings.Contains(action, "RenderingControl:1#GetVolume"):
@@ -149,6 +159,16 @@ func TestExecuteCmd_SayAnnounceWithAudioURI(t *testing.T) {
 	rt := roundTripperFunc(func(r *http.Request) (*http.Response, error) {
 		action := r.Header.Get("SOAPACTION")
 		switch {
+		case r.URL.Path == "/xml/device_description.xml" || action == "":
+			return httpResponseWithStatus(200, `<?xml version="1.0"?>
+<root>
+  <device>
+    <deviceType>urn:schemas-upnp-org:device:ZonePlayer:1</deviceType>
+    <manufacturer>Sonos, Inc.</manufacturer>
+    <roomName>Living Room</roomName>
+    <UDN>uuid:RINCON_ABC1400</UDN>
+  </device>
+</root>`), nil
 		case strings.Contains(action, "ZoneGroupTopology:1#GetZoneGroupState"):
 			return httpResponseWithStatus(500, ""), nil
 		case strings.Contains(action, "AVTransport:1#SetAVTransportURI"):
@@ -231,6 +251,16 @@ func TestSayCmd_AudioURICanForceRadioMode(t *testing.T) {
 	rt := roundTripperFunc(func(r *http.Request) (*http.Response, error) {
 		action := r.Header.Get("SOAPACTION")
 		switch {
+		case r.URL.Path == "/xml/device_description.xml" || action == "":
+			return httpResponseWithStatus(200, `<?xml version="1.0"?>
+<root>
+  <device>
+    <deviceType>urn:schemas-upnp-org:device:ZonePlayer:1</deviceType>
+    <manufacturer>Sonos, Inc.</manufacturer>
+    <roomName>Living Room</roomName>
+    <UDN>uuid:RINCON_ABC1400</UDN>
+  </device>
+</root>`), nil
 		case strings.Contains(action, "ZoneGroupTopology:1#GetZoneGroupState"):
 			return httpResponseWithStatus(500, ""), nil
 		case strings.Contains(action, "AVTransport:1#SetAVTransportURI"):
@@ -393,6 +423,16 @@ func TestSayCmd_RestoresQueuePlaybackAfterAnnouncement(t *testing.T) {
 	rt := roundTripperFunc(func(r *http.Request) (*http.Response, error) {
 		action := r.Header.Get("SOAPACTION")
 		switch {
+		case r.URL.Path == "/xml/device_description.xml" || action == "":
+			return httpResponseWithStatus(200, `<?xml version="1.0"?>
+<root>
+  <device>
+    <deviceType>urn:schemas-upnp-org:device:ZonePlayer:1</deviceType>
+    <manufacturer>Sonos, Inc.</manufacturer>
+    <roomName>Living Room</roomName>
+    <UDN>uuid:RINCON_ABC1400</UDN>
+  </device>
+</root>`), nil
 		case strings.Contains(action, "ZoneGroupTopology:1#GetZoneGroupState"):
 			return httpResponseWithStatus(500, ""), nil
 		case strings.Contains(action, "AVTransport:1#GetMediaInfo"):
@@ -491,5 +531,97 @@ func TestSayCmd_RestoresQueuePlaybackAfterAnnouncement(t *testing.T) {
 	}
 	if len(seekCalls) != 2 || seekCalls[0] != "TRACK_NR:4" || seekCalls[1] != "REL_TIME:0:00:39" {
 		t.Fatalf("unexpected seek calls: %#v", seekCalls)
+	}
+}
+
+func TestSayCmd_RestoresTVSourceAfterAnnouncement(t *testing.T) {
+	flags := &rootFlags{IP: "192.0.2.45", Timeout: 2 * time.Second, Format: formatJSON}
+	cmd := newSayCmd(flags)
+
+	var (
+		playCalls int
+		setURIs   []string
+	)
+
+	rt := roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		action := r.Header.Get("SOAPACTION")
+		switch {
+		case r.URL.Path == "/xml/device_description.xml" || action == "":
+			return httpResponseWithStatus(200, `<?xml version="1.0"?>
+<root>
+  <device>
+    <deviceType>urn:schemas-upnp-org:device:ZonePlayer:1</deviceType>
+    <manufacturer>Sonos, Inc.</manufacturer>
+    <roomName>Living Room</roomName>
+    <UDN>uuid:RINCON_ABC1400</UDN>
+  </device>
+</root>`), nil
+		case strings.Contains(action, "ZoneGroupTopology:1#GetZoneGroupState"):
+			return httpResponseWithStatus(500, ""), nil
+		case strings.Contains(action, "AVTransport:1#GetMediaInfo"):
+			return httpResponseWithStatus(
+				200,
+				soapActionResponse("urn:schemas-upnp-org:service:AVTransport:1", "GetMediaInfo", `<NrTracks>1</NrTracks><MediaDuration></MediaDuration><CurrentURI>x-sonos-htastream:RINCON_ABC1400:spdif</CurrentURI><CurrentURIMetaData>&lt;DIDL-Lite/&gt;</CurrentURIMetaData><NextURI></NextURI><NextURIMetaData></NextURIMetaData>`),
+			), nil
+		case strings.Contains(action, "AVTransport:1#GetPositionInfo"):
+			return httpResponseWithStatus(
+				200,
+				soapActionResponse("urn:schemas-upnp-org:service:AVTransport:1", "GetPositionInfo", `<Track>1</Track><TrackURI>x-sonos-htastream:RINCON_ABC1400:spdif</TrackURI><TrackMetaData>NOT_IMPLEMENTED</TrackMetaData><TrackDuration>NOT_IMPLEMENTED</TrackDuration><RelTime>NOT_IMPLEMENTED</RelTime>`),
+			), nil
+		case strings.Contains(action, "AVTransport:1#GetTransportInfo"):
+			return httpResponseWithStatus(
+				200,
+				soapActionResponse("urn:schemas-upnp-org:service:AVTransport:1", "GetTransportInfo", `<CurrentTransportState>PLAYING</CurrentTransportState><CurrentTransportStatus>OK</CurrentTransportStatus><CurrentSpeed>1</CurrentSpeed>`),
+			), nil
+		case strings.Contains(action, "AVTransport:1#SetAVTransportURI"):
+			body, _ := io.ReadAll(r.Body)
+			_ = r.Body.Close()
+			bodyStr := string(body)
+			if start := strings.Index(bodyStr, "<CurrentURI>"); start >= 0 {
+				start += len("<CurrentURI>")
+				if end := strings.Index(bodyStr, "</CurrentURI>"); end > start {
+					setURIs = append(setURIs, bodyStr[start:end])
+				}
+			}
+			return httpResponseWithStatus(
+				200,
+				soapActionResponse("urn:schemas-upnp-org:service:AVTransport:1", "SetAVTransportURI", ``),
+			), nil
+		case strings.Contains(action, "AVTransport:1#Play"):
+			playCalls++
+			return httpResponseWithStatus(
+				200,
+				soapActionResponse("urn:schemas-upnp-org:service:AVTransport:1", "Play", ``),
+			), nil
+		default:
+			t.Fatalf("unexpected action: %q", action)
+			return nil, nil
+		}
+	})
+
+	oldNew := newSonosClient
+	t.Cleanup(func() { newSonosClient = oldNew })
+	newSonosClient = func(ip string, timeout time.Duration) *sonos.Client {
+		return &sonos.Client{
+			IP:   ip,
+			Port: 1400,
+			HTTP: &http.Client{Timeout: timeout, Transport: rt},
+		}
+	}
+
+	if _, err := execute(t, cmd, "--audio-uri", "http://example.com/tts-tv.aiff", "--hold-seconds", "1", "恢复电视测试"); err != nil {
+		t.Fatalf("say restore tv: %v", err)
+	}
+	if playCalls != 2 {
+		t.Fatalf("expected Play twice (announce + restore), got %d", playCalls)
+	}
+	if len(setURIs) != 2 {
+		t.Fatalf("expected 2 SetAVTransportURI calls, got %#v", setURIs)
+	}
+	if setURIs[0] != "http://example.com/tts-tv.aiff" {
+		t.Fatalf("unexpected announcement URI: %q", setURIs[0])
+	}
+	if setURIs[1] != "x-sonos-htastream:RINCON_ABC1400:spdif" {
+		t.Fatalf("unexpected restored TV URI: %q", setURIs[1])
 	}
 }

@@ -296,11 +296,23 @@ func restoreSayTransportSnapshot(ctx context.Context, c *sonos.Client, snapshot 
 }
 
 func restoreSayQueueSnapshot(ctx context.Context, c *sonos.Client, snapshot sayTransportSnapshot) error {
+	trackNo, hasTrack := parseSayTrackNumber(snapshot.Track)
+	if saySnapshotShouldResume(snapshot.State) && hasTrack {
+		if err := c.PlayQueuePosition(ctx, trackNo); err != nil {
+			return err
+		}
+		if relTime := normalizeRelTime(snapshot.RelTime); relTime != "" && relTime != "0:00:00" {
+			if err := c.SeekRelTime(ctx, relTime); err != nil {
+				return err
+			}
+		}
+		return recoverSayPlayback(ctx, c)
+	}
+
 	if err := c.SetAVTransportURI(ctx, snapshot.CurrentURI, snapshot.CurrentMeta); err != nil {
 		return err
 	}
-
-	if trackNo, ok := parseSayTrackNumber(snapshot.Track); ok {
+	if hasTrack {
 		if err := c.SeekTrackNumber(ctx, trackNo); err != nil {
 			return err
 		}
@@ -310,10 +322,7 @@ func restoreSayQueueSnapshot(ctx context.Context, c *sonos.Client, snapshot sayT
 			return err
 		}
 	}
-	if !saySnapshotShouldResume(snapshot.State) {
-		return nil
-	}
-	return recoverSayPlayback(ctx, c)
+	return nil
 }
 
 func restoreSayDirectSourceSnapshot(ctx context.Context, c *sonos.Client, snapshot sayTransportSnapshot) error {
@@ -327,23 +336,20 @@ func restoreSayDirectSourceSnapshot(ctx context.Context, c *sonos.Client, snapsh
 }
 
 func recoverSayPlayback(ctx context.Context, c *sonos.Client) error {
-	if err := c.Play(ctx); err != nil {
-		return err
-	}
 	state, transportErr := readTransportState(ctx, c)
 	if transportErr == nil && state == "PLAYING" {
 		return nil
 	}
 	for attempt := 1; attempt <= defaultTransitionRetryCount; attempt++ {
-		if err := sleepWithContext(ctx, defaultTransitionRetryDelay); err != nil {
-			return err
-		}
 		if err := c.Play(ctx); err != nil && attempt == defaultTransitionRetryCount {
 			return err
 		}
 		state, transportErr = readTransportState(ctx, c)
 		if transportErr == nil && state == "PLAYING" {
 			return nil
+		}
+		if err := sleepWithContext(ctx, defaultTransitionRetryDelay); err != nil {
+			return err
 		}
 	}
 	if transportErr != nil {

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -28,7 +27,10 @@ func newMuteCmd(flags *rootFlags) *cobra.Command {
 					return err
 				}
 				if isJSON(flags) {
-					return writeJSON(cmd, map[string]any{"mute": v, "coordinatorIP": c.IP})
+					return writeExecutionOK(cmd, flags, "mute.get", newExecutionOutput("transport.mute", "get", executionTargetFromFlags(flags), nil, map[string]any{
+						"mute":          v,
+						"coordinatorIP": c.IP,
+					}), map[string]any{"mute": v, "coordinatorIP": c.IP})
 				}
 				if isTSV(flags) {
 					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "mute\t%v\n", v)
@@ -40,12 +42,22 @@ func newMuteCmd(flags *rootFlags) *cobra.Command {
 				if err := c.SetMute(ctx, true); err != nil {
 					return err
 				}
-				return writeOK(cmd, flags, "mute.on", map[string]any{"coordinatorIP": c.IP})
+				return writeExecutionOK(cmd, flags, "mute.on", newExecutionOutput("transport.mute", "set", executionTargetFromFlags(flags), map[string]any{
+					"mute": true,
+				}, map[string]any{
+					"mute":          true,
+					"coordinatorIP": c.IP,
+				}), map[string]any{"coordinatorIP": c.IP, "mute": true})
 			case "off":
 				if err := c.SetMute(ctx, false); err != nil {
 					return err
 				}
-				return writeOK(cmd, flags, "mute.off", map[string]any{"coordinatorIP": c.IP})
+				return writeExecutionOK(cmd, flags, "mute.off", newExecutionOutput("transport.mute", "set", executionTargetFromFlags(flags), map[string]any{
+					"mute": false,
+				}, map[string]any{
+					"mute":          false,
+					"coordinatorIP": c.IP,
+				}), map[string]any{"coordinatorIP": c.IP, "mute": false})
 			case "toggle":
 				v, err := c.GetMute(ctx)
 				if err != nil {
@@ -54,9 +66,15 @@ func newMuteCmd(flags *rootFlags) *cobra.Command {
 				if err := c.SetMute(ctx, !v); err != nil {
 					return err
 				}
-				return writeOK(cmd, flags, "mute.toggle", map[string]any{"coordinatorIP": c.IP, "mute": !v})
+				return writeExecutionOK(cmd, flags, "mute.toggle", newExecutionOutput("transport.mute", "toggle", executionTargetFromFlags(flags), nil, map[string]any{
+					"mute":          !v,
+					"coordinatorIP": c.IP,
+				}), map[string]any{"coordinatorIP": c.IP, "mute": !v})
 			default:
-				return errors.New("expected on|off|toggle|get")
+				return newInvalidArgumentError("expected on|off|toggle|get", map[string]any{
+					"action": "mute",
+					"value":  strings.TrimSpace(args[0]),
+				})
 			}
 		},
 	}

@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -16,6 +15,18 @@ type sourceClient interface {
 
 var newSourceClient = func(ctx context.Context, flags *rootFlags) (sourceClient, error) {
 	return coordinatorClient(ctx, flags)
+}
+
+func executionMemberFields(mem sonos.Member) map[string]any {
+	return compactMap(map[string]any{
+		"name": strings.TrimSpace(mem.Name),
+		"ip":   strings.TrimSpace(mem.IP),
+		"uuid": strings.TrimSpace(mem.UUID),
+	})
+}
+
+func writeSourceExecutionOK(cmd *cobra.Command, flags *rootFlags, action string, request, result, extra map[string]any) error {
+	return writeExecutionOK(cmd, flags, action, newExecutionOutput("transport.source", action, executionTargetFromFlags(flags), request, result), extra)
 }
 
 func newPlayURICmd(flags *rootFlags) *cobra.Command {
@@ -34,8 +45,11 @@ func newPlayURICmd(flags *rootFlags) *cobra.Command {
 			}
 			uri := strings.TrimSpace(args[0])
 			if uri == "" {
-				return errors.New("uri is required")
+				return newInvalidArgumentError("uri is required", map[string]any{
+					"action": "play-uri",
+				})
 			}
+			requestURI := uri
 
 			c, err := newSourceClient(cmd.Context(), flags)
 			if err != nil {
@@ -59,7 +73,18 @@ func newPlayURICmd(flags *rootFlags) *cobra.Command {
 			if err := c.Play(cmd.Context()); err != nil {
 				return err
 			}
-			return writeOK(cmd, flags, "play-uri", map[string]any{"uri": uri, "radio": radio})
+			return writeSourceExecutionOK(cmd, flags, "play-uri", map[string]any{
+				"uri":   requestURI,
+				"title": strings.TrimSpace(title),
+				"radio": radio,
+			}, map[string]any{
+				"uri":   uri,
+				"title": strings.TrimSpace(title),
+				"radio": radio,
+			}, map[string]any{
+				"uri":   uri,
+				"radio": radio,
+			})
 		},
 	}
 
@@ -109,7 +134,10 @@ func newLineInCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			if mem.UUID == "" {
-				return errors.New("line-in source has no UUID in topology")
+				return newStateInconsistentError("line-in source has no UUID in topology", map[string]any{
+					"action": "linein",
+					"source": source,
+				})
 			}
 
 			uri := "x-rincon-stream:" + mem.UUID
@@ -119,7 +147,12 @@ func newLineInCmd(flags *rootFlags) *cobra.Command {
 			if err := c.Play(cmd.Context()); err != nil {
 				return err
 			}
-			return writeOK(cmd, flags, "linein", map[string]any{"from": mem, "uri": uri})
+			return writeSourceExecutionOK(cmd, flags, "linein", map[string]any{
+				"from": source,
+			}, map[string]any{
+				"from": executionMemberFields(mem),
+				"uri":  uri,
+			}, map[string]any{"from": mem, "uri": uri})
 		},
 	}
 
@@ -143,26 +176,14 @@ func newTVCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 
-			// Resolve UUID of the targeted device.
-			tg, err := newTopologyGetter(cmd.Context(), flags.Timeout)
-			if err != nil {
-				return err
-			}
-			top, err := tg.GetTopology(cmd.Context())
-			if err != nil {
-				return err
-			}
-
-			target := flags.Name
-			if target == "" {
-				target = flags.IP
-			}
-			mem, err := resolveMember(top, target, "")
+			mem, err := resolveTargetMember(cmd.Context(), flags)
 			if err != nil {
 				return err
 			}
 			if mem.UUID == "" {
-				return errors.New("target has no UUID in topology")
+				return newStateInconsistentError("target has no UUID in topology", map[string]any{
+					"action": "tv",
+				})
 			}
 
 			uri := "x-sonos-htastream:" + mem.UUID + ":spdif"
@@ -172,8 +193,70 @@ func newTVCmd(flags *rootFlags) *cobra.Command {
 			if err := c.Play(cmd.Context()); err != nil {
 				return err
 			}
-			return writeOK(cmd, flags, "tv", map[string]any{"target": mem, "uri": uri})
+			return writeSourceExecutionOK(cmd, flags, "tv", nil, map[string]any{
+				"target": executionMemberFields(mem),
+				"uri":    uri,
+			}, map[string]any{"target": mem, "uri": uri})
 		},
 	}
 	return cmd
+}
+
+func newMusicCmd(flags *rootFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:          "music",
+		Short:        "Switch playback back to Sonos music/queue mode",
+		Long:         "Switches the target speaker/group back to the Sonos queue/music transport and resumes playback.",
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validateTarget(flags); err != nil {
+				return err
+			}
+
+			c, err := newSourceClient(cmd.Context(), flags)
+			if err != nil {
+				return err
+			}
+
+			mem, err := resolveTargetMember(cmd.Context(), flags)
+			if err != nil {
+				return err
+			}
+			if mem.UUID == "" {
+				return newStateInconsistentError("target has no UUID in topology", map[string]any{
+					"action": "music",
+				})
+			}
+
+			uri := "x-rincon-queue:" + mem.UUID + "#0"
+			if err := c.SetAVTransportURI(cmd.Context(), uri, ""); err != nil {
+				return err
+			}
+			if err := c.Play(cmd.Context()); err != nil {
+				return err
+			}
+			return writeSourceExecutionOK(cmd, flags, "music", nil, map[string]any{
+				"target": executionMemberFields(mem),
+				"uri":    uri,
+			}, map[string]any{"target": mem, "uri": uri})
+		},
+	}
+	return cmd
+}
+
+func resolveTargetMember(ctx context.Context, flags *rootFlags) (sonos.Member, error) {
+	tg, err := newTopologyGetter(ctx, flags.Timeout)
+	if err != nil {
+		return sonos.Member{}, err
+	}
+	top, err := tg.GetTopology(ctx)
+	if err != nil {
+		return sonos.Member{}, err
+	}
+
+	target := flags.Name
+	if target == "" {
+		target = flags.IP
+	}
+	return resolveMember(top, target, "")
 }

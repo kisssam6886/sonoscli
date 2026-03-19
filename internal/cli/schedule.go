@@ -1,0 +1,507 @@
+package cli
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/spf13/cobra"
+	"github.com/steipete/sonoscli/internal/sonos"
+)
+
+type scheduleItem struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name,omitempty"`
+	Room      string    `json:"room,omitempty"`
+	Action    string    `json:"action"`
+	Payload   string    `json:"payload,omitempty"`
+	At        time.Time `json:"at"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type scheduleFile struct {
+	Version int            `json:"version"`
+	Items   []scheduleItem `json:"items"`
+}
+
+var supportedScheduleActions = []string{"say", "play", "mode", "tv", "music"}
+
+func newScheduleCmd(flags *rootFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "schedule",
+		Short: "Manage Sonos schedules (MVP local store + manual runner)",
+		Long:  "MVP for sonos schedule. Stores schedule definitions locally and can manually run due jobs.",
+	}
+
+	cmd.AddCommand(newScheduleListCmd(flags))
+	cmd.AddCommand(newScheduleAddCmd(flags))
+	cmd.AddCommand(newScheduleRemoveCmd(flags))
+	cmd.AddCommand(newScheduleRunCmd(flags))
+	cmd.AddCommand(newScheduleServeCmd(flags))
+	return cmd
+}
+
+func newScheduleListCmd(flags *rootFlags) *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List scheduled jobs",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			f, err := loadScheduleFile()
+			if err != nil {
+				return err
+			}
+			sort.Slice(f.Items, func(i, j int) bool { return f.Items[i].At.Before(f.Items[j].At) })
+			if isJSON(flags) {
+				return writeExecutionOK(cmd, flags, "schedule.list", newExecutionOutput("schedule", "list", nil, nil, map[string]any{
+					"count": len(f.Items),
+				}), map[string]any{"items": f.Items})
+			}
+			if len(f.Items) == 0 {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No schedule items.")
+				return nil
+			}
+			for _, it := range f.Items {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s | %s | room=%s | action=%s | payload=%s\n", it.ID, it.At.Format(time.RFC3339), it.Room, it.Action, it.Payload)
+			}
+			return nil
+		},
+	}
+}
+
+func newScheduleAddCmd(flags *rootFlags) *cobra.Command {
+	var (
+		name    string
+		action  string
+		payload string
+		at      string
+	)
+	cmd := &cobra.Command{
+		Use:   "add",
+		Short: "Add a schedule item",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			action = strings.TrimSpace(strings.ToLower(action))
+			if !isSupportedScheduleAction(action) {
+				return newInvalidArgumentError("unsupported --action: "+action, map[string]any{
+					"action":           "schedule.add",
+					"requestedAction":  action,
+					"supportedActions": append([]string(nil), supportedScheduleActions...),
+				})
+			}
+			when, err := time.Parse(time.RFC3339, strings.TrimSpace(at))
+			if err != nil {
+				return newInvalidArgumentError("invalid --at, use RFC3339", map[string]any{
+					"action": "schedule.add",
+					"at":     strings.TrimSpace(at),
+					"cause":  err.Error(),
+				})
+			}
+			if when.Before(time.Now().Add(-30 * time.Second)) {
+				return newInvalidArgumentError("--at is in the past", map[string]any{
+					"action": "schedule.add",
+					"at":     when.Format(time.RFC3339),
+				})
+			}
+
+			f, err := loadScheduleFile()
+			if err != nil {
+				return err
+			}
+
+			item := scheduleItem{
+				ID:        newScheduleID(),
+				Name:      strings.TrimSpace(name),
+				Room:      strings.TrimSpace(flags.Name),
+				Action:    action,
+				Payload:   strings.TrimSpace(payload),
+				At:        when,
+				CreatedAt: time.Now(),
+			}
+			f.Items = append(f.Items, item)
+			if err := saveScheduleFile(f); err != nil {
+				return err
+			}
+
+			if isJSON(flags) {
+				return writeExecutionOK(cmd, flags, "schedule.add", newExecutionOutput("schedule", "add", scheduleTarget(item.Room), map[string]any{
+					"name":    item.Name,
+					"room":    item.Room,
+					"action":  item.Action,
+					"payload": item.Payload,
+					"at":      item.At.Format(time.RFC3339),
+				}, map[string]any{
+					"id": item.ID,
+				}), map[string]any{"item": item})
+			}
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Added schedule: %s at %s\n", item.ID, item.At.Format(time.RFC3339))
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&name, "name", "", "Human friendly schedule name")
+	cmd.Flags().StringVar(&action, "action", "", "Action: say|play|mode|tv|music")
+	cmd.Flags().StringVar(&payload, "payload", "", "Action payload (free text / serialized args)")
+	cmd.Flags().StringVar(&at, "at", "", "Execution time (RFC3339), e.g. 2026-03-20T09:30:00+08:00")
+	_ = cmd.MarkFlagRequired("action")
+	_ = cmd.MarkFlagRequired("at")
+	return cmd
+}
+
+func newScheduleRemoveCmd(flags *rootFlags) *cobra.Command {
+	return &cobra.Command{
+		Use:   "remove <id>",
+		Short: "Remove a schedule item by id",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id := strings.TrimSpace(args[0])
+			f, err := loadScheduleFile()
+			if err != nil {
+				return err
+			}
+			next := make([]scheduleItem, 0, len(f.Items))
+			removed := false
+			for _, it := range f.Items {
+				if it.ID == id {
+					removed = true
+					continue
+				}
+				next = append(next, it)
+			}
+			if !removed {
+				return newNotFoundError("schedule id not found: "+id, map[string]any{
+					"action": "schedule.remove",
+					"id":     id,
+				})
+			}
+			f.Items = next
+			if err := saveScheduleFile(f); err != nil {
+				return err
+			}
+			return writeExecutionOK(cmd, flags, "schedule.remove", newExecutionOutput("schedule", "remove", nil, map[string]any{
+				"id": id,
+			}, map[string]any{
+				"id": id,
+			}), map[string]any{"id": id})
+		},
+	}
+}
+
+func newScheduleRunCmd(flags *rootFlags) *cobra.Command {
+	var id string
+	cmd := &cobra.Command{
+		Use:   "run",
+		Short: "Run due schedule items now",
+		Long:  "Execute due schedule items from local schedule store. Use --id to run one specific item.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			results, remaining, err := runDueSchedules(cmd, flags, strings.TrimSpace(id), true)
+			if err != nil {
+				return err
+			}
+			if len(results) == 0 {
+				if isJSON(flags) {
+					return writeExecutionOK(cmd, flags, "schedule.run", newExecutionOutput("schedule", "run", nil, map[string]any{
+						"id": strings.TrimSpace(id),
+					}, map[string]any{
+						"ran":       0,
+						"remaining": remaining,
+					}), map[string]any{"ran": 0, "remaining": remaining})
+				}
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No due schedules to run.")
+				return nil
+			}
+			if isJSON(flags) {
+				return writeExecutionOK(cmd, flags, "schedule.run", newExecutionOutput("schedule", "run", nil, map[string]any{
+					"id": strings.TrimSpace(id),
+				}, map[string]any{
+					"ran":       len(results),
+					"remaining": remaining,
+				}), map[string]any{"results": results, "remaining": remaining})
+			}
+			for _, r := range results {
+				if r["ok"] == true {
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "ran: %s\n", r["id"])
+				} else {
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "failed: %s (%s)\n", r["id"], r["error"])
+				}
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&id, "id", "", "Run only this schedule id")
+	return cmd
+}
+
+func newScheduleServeCmd(flags *rootFlags) *cobra.Command {
+	var (
+		interval time.Duration
+		once     bool
+	)
+	cmd := &cobra.Command{
+		Use:   "serve",
+		Short: "Run schedule worker loop",
+		Long:  "Run a local loop that periodically executes due schedule items.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if interval <= 0 {
+				interval = 30 * time.Second
+			}
+			run := func() error {
+				results, remaining, err := runDueSchedules(cmd, flags, "", true)
+				if err != nil {
+					return err
+				}
+				if isJSON(flags) {
+					_ = writeJSONLine(cmd, executionJSONLine("schedule.serve", newExecutionOutput("schedule", "serve", nil, map[string]any{
+						"interval": interval.String(),
+						"once":     once,
+					}, map[string]any{
+						"ran":       len(results),
+						"remaining": remaining,
+					}), map[string]any{
+						"event":     "tick",
+						"time":      time.Now().Format(time.RFC3339),
+						"ran":       len(results),
+						"remaining": remaining,
+					}))
+				} else if len(results) > 0 {
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "[%s] ran=%d remaining=%d\n", time.Now().Format(time.RFC3339), len(results), remaining)
+				}
+				return nil
+			}
+			if once {
+				return run()
+			}
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				if err := run(); err != nil {
+					if isJSON(flags) {
+						_ = writeJSONLine(cmd, executionJSONLine("schedule.serve", executionErrorOutput("schedule", "serve", map[string]any{
+							"interval": interval.String(),
+							"once":     once,
+						}), map[string]any{"event": "error", "error": err.Error()}))
+					} else {
+						_, _ = fmt.Fprintf(cmd.OutOrStdout(), "schedule serve error: %v\n", err)
+					}
+				}
+				select {
+				case <-cmd.Context().Done():
+					return cmd.Context().Err()
+				case <-ticker.C:
+				}
+			}
+		},
+	}
+	cmd.Flags().DurationVar(&interval, "interval", 30*time.Second, "Polling interval for due schedules")
+	cmd.Flags().BoolVar(&once, "once", false, "Run one tick then exit")
+	return cmd
+}
+
+func runDueSchedules(cmd *cobra.Command, flags *rootFlags, onlyID string, keepFailed bool) ([]map[string]any, int, error) {
+	f, err := loadScheduleFile()
+	if err != nil {
+		return nil, 0, err
+	}
+	now := time.Now()
+	runItems := make([]scheduleItem, 0)
+	keepItems := make([]scheduleItem, 0, len(f.Items))
+	for _, it := range f.Items {
+		if onlyID != "" {
+			if it.ID == onlyID {
+				runItems = append(runItems, it)
+			} else {
+				keepItems = append(keepItems, it)
+			}
+			continue
+		}
+		if !it.At.After(now) {
+			runItems = append(runItems, it)
+		} else {
+			keepItems = append(keepItems, it)
+		}
+	}
+	results := make([]map[string]any, 0, len(runItems))
+	for _, it := range runItems {
+		err := executeScheduleItem(cmd, flags, it)
+		if err != nil {
+			results = append(results, map[string]any{"id": it.ID, "ok": false, "error": err.Error()})
+			if keepFailed {
+				keepItems = append(keepItems, it)
+			}
+			continue
+		}
+		results = append(results, map[string]any{"id": it.ID, "ok": true})
+	}
+	f.Items = keepItems
+	if err := saveScheduleFile(f); err != nil {
+		return nil, 0, err
+	}
+	return results, len(keepItems), nil
+}
+
+func executeScheduleItem(cmd *cobra.Command, flags *rootFlags, it scheduleItem) error {
+	f := *flags
+	if strings.TrimSpace(it.Room) != "" {
+		f.Name = strings.TrimSpace(it.Room)
+	}
+	ctx := cmd.Context()
+	switch it.Action {
+	case "play":
+		c, err := coordinatorClient(ctx, &f)
+		if err != nil {
+			return err
+		}
+		return c.Play(ctx)
+	case "tv":
+		c, err := newSourceClient(ctx, &f)
+		if err != nil {
+			return err
+		}
+		mem, err := resolveTargetMember(ctx, &f)
+		if err != nil {
+			return err
+		}
+		uri := "x-sonos-htastream:" + mem.UUID + ":spdif"
+		if err := c.SetAVTransportURI(ctx, uri, ""); err != nil {
+			return err
+		}
+		return c.Play(ctx)
+	case "music":
+		c, err := newSourceClient(ctx, &f)
+		if err != nil {
+			return err
+		}
+		mem, err := resolveTargetMember(ctx, &f)
+		if err != nil {
+			return err
+		}
+		uri := "x-rincon-queue:" + mem.UUID + "#0"
+		if err := c.SetAVTransportURI(ctx, uri, ""); err != nil {
+			return err
+		}
+		return c.Play(ctx)
+	case "mode":
+		c, err := coordinatorClient(ctx, &f)
+		if err != nil {
+			return err
+		}
+		return applyMode(c, ctx, strings.TrimSpace(strings.ToLower(it.Payload)))
+	case "say":
+		c, err := coordinatorClient(ctx, &f)
+		if err != nil {
+			return err
+		}
+		uri := strings.TrimSpace(it.Payload)
+		if uri == "" {
+			return newInvalidArgumentError("say payload must be audio URI", map[string]any{
+				"action":         "schedule.execute",
+				"id":             it.ID,
+				"scheduleAction": it.Action,
+			})
+		}
+		return c.PlayURI(ctx, uri, "")
+	default:
+		return newInvalidArgumentError("unsupported schedule action: "+it.Action, map[string]any{
+			"action":           "schedule.execute",
+			"id":               it.ID,
+			"scheduleAction":   it.Action,
+			"supportedActions": append([]string(nil), supportedScheduleActions...),
+		})
+	}
+}
+
+func applyMode(c *sonos.Client, ctx context.Context, mode string) error {
+	switch mode {
+	case "shuffle":
+		return c.SetPlayMode(ctx, sonos.PlayModeShuffle)
+	case "shuffle-norepeat":
+		return c.SetPlayMode(ctx, sonos.PlayModeShuffleNoRepeat)
+	case "repeat":
+		return c.SetPlayMode(ctx, sonos.PlayModeRepeatAll)
+	case "repeat-one":
+		return c.SetPlayMode(ctx, sonos.PlayModeRepeatOne)
+	case "normal", "":
+		return c.SetPlayMode(ctx, sonos.PlayModeNormal)
+	default:
+		return newInvalidArgumentError("unsupported mode payload: "+mode, map[string]any{
+			"action": "schedule.execute",
+			"mode":   mode,
+		})
+	}
+}
+
+func isSupportedScheduleAction(action string) bool {
+	for _, candidate := range supportedScheduleActions {
+		if candidate == action {
+			return true
+		}
+	}
+	return false
+}
+
+func scheduleTarget(room string) map[string]any {
+	room = strings.TrimSpace(room)
+	if room == "" {
+		return nil
+	}
+	return map[string]any{"room": room}
+}
+
+func scheduleFilePath() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "sonoscli", "schedule.json"), nil
+}
+
+func loadScheduleFile() (scheduleFile, error) {
+	p, err := scheduleFilePath()
+	if err != nil {
+		return scheduleFile{}, err
+	}
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return scheduleFile{Version: 1, Items: nil}, nil
+		}
+		return scheduleFile{}, err
+	}
+	var f scheduleFile
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return scheduleFile{}, fmt.Errorf("parse schedule file: %w", err)
+	}
+	if f.Version == 0 {
+		f.Version = 1
+	}
+	return f, nil
+}
+
+func saveScheduleFile(f scheduleFile) error {
+	p, err := scheduleFilePath()
+	if err != nil {
+		return err
+	}
+	if f.Version == 0 {
+		f.Version = 1
+	}
+	dir := filepath.Dir(p)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(f, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, p)
+}
+
+func newScheduleID() string {
+	return fmt.Sprintf("sch_%d", time.Now().UnixNano())
+}

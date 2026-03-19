@@ -146,11 +146,50 @@ func TestMuteToggleJSON(t *testing.T) {
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(out.String(), `"action": "mute.toggle"`) || !strings.Contains(out.String(), `"mute": true`) {
+	if !strings.Contains(out.String(), `"action": "mute.toggle"`) || !strings.Contains(out.String(), `"capability": "transport.mute"`) || !strings.Contains(out.String(), `"operation": "toggle"`) || !strings.Contains(out.String(), `"mute": true`) {
 		t.Fatalf("unexpected output: %q", out.String())
 	}
 	if got := strings.Join(calls, "\n"); !strings.Contains(got, "RenderingControl:1#GetMute") || !strings.Contains(got, "RenderingControl:1#SetMute") {
 		t.Fatalf("missing calls: %#v", calls)
+	}
+}
+
+func TestMuteGetJSONIncludesExecutionEnvelope(t *testing.T) {
+	flags := &rootFlags{IP: "192.0.2.111", Timeout: 2 * time.Second, Format: formatJSON}
+	cmd := newMuteCmd(flags)
+
+	rt := roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		action := r.Header.Get("SOAPACTION")
+		switch {
+		case strings.Contains(action, "ZoneGroupTopology:1#GetZoneGroupState"):
+			return httpResponseWithStatus(500, ""), nil
+		case strings.Contains(action, "RenderingControl:1#GetMute"):
+			return httpResponseWithStatus(
+				200,
+				soapActionResponse("urn:schemas-upnp-org:service:RenderingControl:1", "GetMute", `<CurrentMute>1</CurrentMute>`),
+			), nil
+		default:
+			t.Fatalf("unexpected action: %q", action)
+			return nil, nil
+		}
+	})
+
+	oldNew := newSonosClient
+	t.Cleanup(func() { newSonosClient = oldNew })
+	newSonosClient = func(ip string, timeout time.Duration) *sonos.Client {
+		return &sonos.Client{
+			IP:   ip,
+			Port: 1400,
+			HTTP: &http.Client{Timeout: timeout, Transport: rt},
+		}
+	}
+
+	out, err := execute(t, cmd, "get")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, `"action": "mute.get"`) || !strings.Contains(out, `"capability": "transport.mute"`) || !strings.Contains(out, `"operation": "get"`) || !strings.Contains(out, `"mute": true`) {
+		t.Fatalf("unexpected output: %q", out)
 	}
 }
 
@@ -249,8 +288,47 @@ func TestVolumeSetClampsAndOutputsJSON(t *testing.T) {
 	if sawDesired != "100" {
 		t.Fatalf("expected DesiredVolume=100, got %q", sawDesired)
 	}
-	if !strings.Contains(out.String(), `"action": "volume.set"`) || !strings.Contains(out.String(), `"volume": 120`) {
+	if !strings.Contains(out.String(), `"action": "volume.set"`) || !strings.Contains(out.String(), `"capability": "transport.volume"`) || !strings.Contains(out.String(), `"operation": "set"`) || !strings.Contains(out.String(), `"volume": 120`) {
 		t.Fatalf("unexpected output: %q", out.String())
+	}
+}
+
+func TestVolumeGetJSONIncludesExecutionEnvelope(t *testing.T) {
+	flags := &rootFlags{IP: "192.0.2.121", Timeout: 2 * time.Second, Format: formatJSON}
+	cmd := newVolumeCmd(flags)
+
+	rt := roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		action := r.Header.Get("SOAPACTION")
+		switch {
+		case strings.Contains(action, "ZoneGroupTopology:1#GetZoneGroupState"):
+			return httpResponseWithStatus(500, ""), nil
+		case strings.Contains(action, "RenderingControl:1#GetVolume"):
+			return httpResponseWithStatus(
+				200,
+				soapActionResponse("urn:schemas-upnp-org:service:RenderingControl:1", "GetVolume", `<CurrentVolume>33</CurrentVolume>`),
+			), nil
+		default:
+			t.Fatalf("unexpected action: %q", action)
+			return nil, nil
+		}
+	})
+
+	oldNew := newSonosClient
+	t.Cleanup(func() { newSonosClient = oldNew })
+	newSonosClient = func(ip string, timeout time.Duration) *sonos.Client {
+		return &sonos.Client{
+			IP:   ip,
+			Port: 1400,
+			HTTP: &http.Client{Timeout: timeout, Transport: rt},
+		}
+	}
+
+	out, err := execute(t, cmd, "get")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, `"action": "volume.get"`) || !strings.Contains(out, `"capability": "transport.volume"`) || !strings.Contains(out, `"operation": "get"`) || !strings.Contains(out, `"volume": 33`) {
+		t.Fatalf("unexpected output: %q", out)
 	}
 }
 
@@ -297,7 +375,7 @@ func TestTransportPrevFallsBackToSeek(t *testing.T) {
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(out.String(), `"action": "prev"`) {
+	if !strings.Contains(out.String(), `"action": "prev"`) || !strings.Contains(out.String(), `"capability": "transport"`) || !strings.Contains(out.String(), `"operation": "prev"`) {
 		t.Fatalf("unexpected output: %q", out.String())
 	}
 	got := strings.Join(calls, "\n")
@@ -347,7 +425,7 @@ func TestTransportPlayJSON(t *testing.T) {
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(out.String(), `"action": "play"`) {
+	if !strings.Contains(out.String(), `"action": "play"`) || !strings.Contains(out.String(), `"capability": "transport"`) || !strings.Contains(out.String(), `"operation": "play"`) {
 		t.Fatalf("unexpected output: %q", out.String())
 	}
 	got := strings.Join(calls, "\n")
@@ -367,19 +445,25 @@ func TestTransportPauseStopNextJSON(t *testing.T) {
 			name:   "pause",
 			cmdFn:  newPauseCmd,
 			expect: "AVTransport:1#Pause",
-			ok:     func(out string) bool { return strings.Contains(out, `"action": "pause"`) },
+			ok: func(out string) bool {
+				return strings.Contains(out, `"action": "pause"`) && strings.Contains(out, `"capability": "transport"`) && strings.Contains(out, `"operation": "pause"`)
+			},
 		},
 		{
 			name:   "stop",
 			cmdFn:  newStopCmd,
 			expect: "AVTransport:1#Stop",
-			ok:     func(out string) bool { return strings.Contains(out, `"action": "stop"`) },
+			ok: func(out string) bool {
+				return strings.Contains(out, `"action": "stop"`) && strings.Contains(out, `"capability": "transport"`) && strings.Contains(out, `"operation": "stop"`)
+			},
 		},
 		{
 			name:   "next",
 			cmdFn:  newNextCmd,
 			expect: "AVTransport:1#Next",
-			ok:     func(out string) bool { return strings.Contains(out, `"action": "next"`) },
+			ok: func(out string) bool {
+				return strings.Contains(out, `"action": "next"`) && strings.Contains(out, `"capability": "transport"`) && strings.Contains(out, `"operation": "next"`)
+			},
 		},
 	}
 

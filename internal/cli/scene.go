@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -37,7 +36,10 @@ var newSceneTopologyGetter = func(ctx context.Context, timeout time.Duration) (s
 		return nil, err
 	}
 	if len(devs) == 0 {
-		return nil, errors.New("no speakers found")
+		return nil, newTargetNotFoundError("no speakers found", nil, map[string]any{
+			"action":     "scene.topology",
+			"resolution": "discover",
+		})
 	}
 	return sonos.NewClient(devs[0].IP, timeout), nil
 }
@@ -74,7 +76,11 @@ func newSceneListCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			if isJSON(flags) {
-				return writeJSON(cmd, metas)
+				return writeExecutionOK(cmd, flags, "scene.list", newExecutionOutput("scene", "list", nil, nil, map[string]any{
+					"count": len(metas),
+				}), map[string]any{
+					"items": metas,
+				})
 			}
 			if isTSV(flags) {
 				for _, m := range metas {
@@ -109,7 +115,9 @@ func newSceneSaveCmd(flags *rootFlags) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := strings.TrimSpace(args[0])
 			if name == "" {
-				return errors.New("scene name is required")
+				return newInvalidArgumentError("scene name is required", map[string]any{
+					"action": "scene.save",
+				})
 			}
 
 			store, err := newSceneStore()
@@ -181,7 +189,17 @@ func newSceneSaveCmd(flags *rootFlags) *cobra.Command {
 			if err := store.Put(scene); err != nil {
 				return err
 			}
-			return writeOK(cmd, flags, "scene.save", map[string]any{"name": scene.Name})
+			return writeExecutionOK(cmd, flags, "scene.save", newExecutionOutput("scene", "save", nil, map[string]any{
+				"name": scene.Name,
+			}, map[string]any{
+				"name":        scene.Name,
+				"groupCount":  len(scene.Groups),
+				"deviceCount": len(scene.Devices),
+			}), map[string]any{
+				"name":        scene.Name,
+				"groupCount":  len(scene.Groups),
+				"deviceCount": len(scene.Devices),
+			})
 		},
 	}
 	return cmd
@@ -198,7 +216,9 @@ func newSceneApplyCmd(flags *rootFlags) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := strings.TrimSpace(args[0])
 			if name == "" {
-				return errors.New("scene name is required")
+				return newInvalidArgumentError("scene name is required", map[string]any{
+					"action": "scene.apply",
+				})
 			}
 
 			store, err := newSceneStore()
@@ -210,7 +230,10 @@ func newSceneApplyCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			if !ok {
-				return errors.New("scene not found: " + name)
+				return newNotFoundError("scene not found: "+name, map[string]any{
+					"action": "scene.apply",
+					"scene":  name,
+				})
 			}
 
 			tg, err := newSceneTopologyGetter(cmd.Context(), flags.Timeout)
@@ -265,7 +288,10 @@ func newSceneApplyCmd(flags *rootFlags) *cobra.Command {
 					}
 				}
 				if !ok || mem.UUID == "" {
-					return errors.New("speaker not found for --only: " + only)
+					return newTargetNotFoundError("speaker not found for --only: "+only, flags, map[string]any{
+						"action": "scene.apply",
+						"only":   only,
+					})
 				}
 				for k := range involved {
 					involved[k] = false
@@ -304,7 +330,12 @@ func newSceneApplyCmd(flags *rootFlags) *cobra.Command {
 					}
 				}
 				if coordIP == "" {
-					return errors.New("coordinator not found on network: " + g.CoordinatorUUID)
+					return newTargetNotFoundError("coordinator not found on network: "+g.CoordinatorUUID, nil, map[string]any{
+						"action": "scene.apply",
+						"kind":   "coordinator",
+						"scene":  scene.Name,
+						"uuid":   g.CoordinatorUUID,
+					})
 				}
 
 				for _, memberUUID := range g.MemberUUIDs {
@@ -321,7 +352,12 @@ func newSceneApplyCmd(flags *rootFlags) *cobra.Command {
 						}
 					}
 					if memberIP == "" {
-						return errors.New("member not found on network: " + memberUUID)
+						return newTargetNotFoundError("member not found on network: "+memberUUID, nil, map[string]any{
+							"action": "scene.apply",
+							"kind":   "member",
+							"scene":  scene.Name,
+							"uuid":   memberUUID,
+						})
 					}
 					if err := newSceneSpeakerClient(memberIP, flags.Timeout).JoinGroup(cmd.Context(), g.CoordinatorUUID); err != nil {
 						return err
@@ -346,7 +382,24 @@ func newSceneApplyCmd(flags *rootFlags) *cobra.Command {
 				_ = c.SetVolume(cmd.Context(), dev.Volume)
 			}
 
-			return writeOK(cmd, flags, "scene.apply", map[string]any{"name": scene.Name, "only": strings.TrimSpace(only)})
+			target := map[string]any{}
+			if strings.TrimSpace(only) != "" {
+				target["room"] = strings.TrimSpace(only)
+			}
+			return writeExecutionOK(cmd, flags, "scene.apply", newExecutionOutput("scene", "apply", target, map[string]any{
+				"name": scene.Name,
+				"only": strings.TrimSpace(only),
+			}, map[string]any{
+				"name":        scene.Name,
+				"only":        strings.TrimSpace(only),
+				"groupCount":  len(scene.Groups),
+				"deviceCount": len(scene.Devices),
+			}), map[string]any{
+				"name":        scene.Name,
+				"only":        strings.TrimSpace(only),
+				"groupCount":  len(scene.Groups),
+				"deviceCount": len(scene.Devices),
+			})
 		},
 	}
 
@@ -368,7 +421,11 @@ func newSceneDeleteCmd(flags *rootFlags) *cobra.Command {
 			if err := store.Delete(args[0]); err != nil {
 				return err
 			}
-			return writeOK(cmd, flags, "scene.delete", map[string]any{"name": args[0]})
+			return writeExecutionOK(cmd, flags, "scene.delete", newExecutionOutput("scene", "delete", nil, map[string]any{
+				"name": args[0],
+			}, map[string]any{
+				"name": args[0],
+			}), map[string]any{"name": args[0]})
 		},
 	}
 }

@@ -13,6 +13,38 @@ import (
 	"github.com/steipete/sonoscli/internal/sonos"
 )
 
+type fakePlaySpotifySearcher struct {
+	result sonos.SMAPISearchResult
+	err    error
+	calls  int
+}
+
+func (f *fakePlaySpotifySearcher) Search(ctx context.Context, category, term string, index, count int) (sonos.SMAPISearchResult, error) {
+	f.calls++
+	return f.result, f.err
+}
+
+type fakePlaySpotifyEnqueuer struct {
+	coordinatorIP string
+	pos           int
+	err           error
+	calls         int
+	lastInput     string
+	lastOpts      sonos.EnqueueOptions
+}
+
+func (f *fakePlaySpotifyEnqueuer) EnqueueSpotify(ctx context.Context, input string, opts sonos.EnqueueOptions) (int, error) {
+	f.calls++
+	f.lastInput = input
+	f.lastOpts = opts
+	if f.pos <= 0 {
+		f.pos = 1
+	}
+	return f.pos, f.err
+}
+
+func (f *fakePlaySpotifyEnqueuer) CoordinatorIP() string { return f.coordinatorIP }
+
 func TestRealSpotifyEnqueuer_EnqueueSpotify(t *testing.T) {
 	t.Parallel()
 
@@ -84,4 +116,102 @@ func TestRealSpotifyEnqueuer_EnqueueSpotify(t *testing.T) {
 	cancel()
 	c.HTTP.Timeout = 10 * time.Second
 	_, _ = enq.EnqueueSpotify(ctx, "spotify:track:abc", sonos.EnqueueOptions{Title: "X"})
+}
+
+func TestPlaySpotifyJSONIncludesExecutionEnvelope(t *testing.T) {
+	flags := &rootFlags{Name: "Kitchen", Format: formatJSON}
+	cmd := newPlaySpotifyCmd(flags)
+
+	searcher := &fakePlaySpotifySearcher{
+		result: sonos.SMAPISearchResult{
+			MediaMetadata: []sonos.SMAPIItem{
+				{
+					ID:       "spotify:track:abc",
+					ItemType: "track",
+					Title:    "友情岁月",
+				},
+			},
+		},
+	}
+	enq := &fakePlaySpotifyEnqueuer{coordinatorIP: "10.0.0.9", pos: 4}
+
+	origSearcher := newSMAPISearcher
+	origEnqueuer := newSpotifyEnqueuer
+	t.Cleanup(func() {
+		newSMAPISearcher = origSearcher
+		newSpotifyEnqueuer = origEnqueuer
+	})
+
+	newSMAPISearcher = func(ctx context.Context, flags *rootFlags, serviceName string) (smapiSearcher, sonos.MusicServiceDescriptor, *sonos.Client, error) {
+		return searcher, sonos.MusicServiceDescriptor{ID: "9", Name: "Spotify", Auth: "UserId"}, &sonos.Client{IP: "10.0.0.8"}, nil
+	}
+	newSpotifyEnqueuer = func(ctx context.Context, flags *rootFlags) (spotifyEnqueuer, error) {
+		return enq, nil
+	}
+
+	out, err := execute(t, cmd, "郑伊健")
+	if err != nil {
+		t.Fatalf("play spotify: %v", err)
+	}
+	if !strings.Contains(out, "\"action\": \"play.spotify\"") || !strings.Contains(out, "\"capability\": \"music.spotify\"") || !strings.Contains(out, "\"operation\": \"play\"") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+	if !strings.Contains(out, "\"selectedTitle\": \"友情岁月\"") || !strings.Contains(out, "\"enqueuedPos\": 4") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+	if enq.calls != 1 {
+		t.Fatalf("expected enqueuer call, got %d", enq.calls)
+	}
+	if !enq.lastOpts.PlayNow {
+		t.Fatalf("expected PlayNow=true")
+	}
+}
+
+func TestPlaySpotifyEnqueueJSONIncludesExecutionEnvelope(t *testing.T) {
+	flags := &rootFlags{Name: "Kitchen", Format: formatJSON}
+	cmd := newPlaySpotifyCmd(flags)
+
+	searcher := &fakePlaySpotifySearcher{
+		result: sonos.SMAPISearchResult{
+			MediaMetadata: []sonos.SMAPIItem{
+				{
+					ID:       "spotify:track:def",
+					ItemType: "track",
+					Title:    "男人哭吧不是罪",
+				},
+			},
+		},
+	}
+	enq := &fakePlaySpotifyEnqueuer{coordinatorIP: "10.0.0.10", pos: 2}
+
+	origSearcher := newSMAPISearcher
+	origEnqueuer := newSpotifyEnqueuer
+	t.Cleanup(func() {
+		newSMAPISearcher = origSearcher
+		newSpotifyEnqueuer = origEnqueuer
+	})
+
+	newSMAPISearcher = func(ctx context.Context, flags *rootFlags, serviceName string) (smapiSearcher, sonos.MusicServiceDescriptor, *sonos.Client, error) {
+		return searcher, sonos.MusicServiceDescriptor{ID: "9", Name: "Spotify", Auth: "UserId"}, &sonos.Client{IP: "10.0.0.8"}, nil
+	}
+	newSpotifyEnqueuer = func(ctx context.Context, flags *rootFlags) (spotifyEnqueuer, error) {
+		return enq, nil
+	}
+
+	out, err := execute(t, cmd, "--enqueue", "刘德华")
+	if err != nil {
+		t.Fatalf("play spotify --enqueue: %v", err)
+	}
+	if !strings.Contains(out, "\"action\": \"play.spotify\"") || !strings.Contains(out, "\"capability\": \"music.spotify\"") || !strings.Contains(out, "\"operation\": \"enqueue\"") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+	if !strings.Contains(out, "\"enqueueOnly\": true") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+	if enq.calls != 1 {
+		t.Fatalf("expected enqueuer call, got %d", enq.calls)
+	}
+	if enq.lastOpts.PlayNow {
+		t.Fatalf("expected PlayNow=false")
+	}
 }

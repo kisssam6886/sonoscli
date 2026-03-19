@@ -148,6 +148,9 @@ func TestWatchCmdEmitsJSONEvent(t *testing.T) {
 	}
 
 	got := out.String()
+	if !strings.Contains(got, "\"action\":\"watch.event\"") || !strings.Contains(got, "\"capability\":\"watch\"") || !strings.Contains(got, "\"operation\":\"event\"") {
+		t.Fatalf("missing execution envelope in output: %q", got)
+	}
 	if !strings.Contains(got, "\"service\"") || !strings.Contains(got, "avtransport") {
 		t.Fatalf("missing service in output: %q", got)
 	}

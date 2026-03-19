@@ -136,9 +136,62 @@ func TestConfigPathPlainAndJSON(t *testing.T) {
 		if err := cmd.ExecuteContext(context.Background()); err != nil {
 			t.Fatalf("path json: %v", err)
 		}
-		if !strings.Contains(out.String(), store.Path()) || !strings.Contains(out.String(), "\"path\"") {
+		if !strings.Contains(out.String(), "\"action\": \"config.path\"") || !strings.Contains(out.String(), "\"capability\": \"config\"") || !strings.Contains(out.String(), "\"operation\": \"path\"") || !strings.Contains(out.String(), store.Path()) || !strings.Contains(out.String(), "\"path\"") {
 			t.Fatalf("unexpected json output: %q", out.String())
 		}
+	}
+}
+
+func TestConfigGetJSONIncludesExecutionEnvelope(t *testing.T) {
+	flags := &rootFlags{Timeout: 2 * time.Second, Format: formatJSON}
+
+	dir := t.TempDir()
+	store, err := appconfig.NewFileStore(filepath.Join(dir, "config.json"))
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	if err := store.Save(appconfig.Config{DefaultRoom: "Office", Format: "json"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	orig := newConfigStore
+	t.Cleanup(func() { newConfigStore = orig })
+	newConfigStore = func() (appconfig.Store, error) { return store, nil }
+
+	out, err := execute(t, newConfigGetCmd(flags))
+	if err != nil {
+		t.Fatalf("config get json: %v", err)
+	}
+	if !strings.Contains(out, "\"action\": \"config.get\"") || !strings.Contains(out, "\"capability\": \"config\"") || !strings.Contains(out, "\"operation\": \"get\"") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+	if !strings.Contains(out, "\"defaultRoom\": \"Office\"") || !strings.Contains(out, "\"format\": \"json\"") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
+func TestConfigSetJSONIncludesExecutionEnvelope(t *testing.T) {
+	flags := &rootFlags{Timeout: 2 * time.Second, Format: formatJSON}
+
+	dir := t.TempDir()
+	store, err := appconfig.NewFileStore(filepath.Join(dir, "config.json"))
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	orig := newConfigStore
+	t.Cleanup(func() { newConfigStore = orig })
+	newConfigStore = func() (appconfig.Store, error) { return store, nil }
+
+	out, err := execute(t, newConfigSetCmd(flags), "defaultRoom", "Office")
+	if err != nil {
+		t.Fatalf("config set json: %v", err)
+	}
+	if !strings.Contains(out, "\"action\": \"config.set\"") || !strings.Contains(out, "\"capability\": \"config\"") || !strings.Contains(out, "\"operation\": \"set\"") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+	if !strings.Contains(out, "\"key\": \"defaultRoom\"") || !strings.Contains(out, "\"value\": \"Office\"") {
+		t.Fatalf("unexpected output: %q", out)
 	}
 }
 

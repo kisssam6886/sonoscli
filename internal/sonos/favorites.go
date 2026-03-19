@@ -3,6 +3,8 @@ package sonos
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strings"
 )
 
 type FavoriteItem struct {
@@ -57,7 +59,7 @@ func (c *Client) PlayFavorite(ctx context.Context, favorite DIDLItem) error {
 
 func favoriteURI(favorite DIDLItem) string {
 	if favorite.URI != "" {
-		return favorite.URI
+		return safeURIDecode(favorite.URI)
 	}
 	if favorite.ResMD == "" {
 		return ""
@@ -66,5 +68,23 @@ func favoriteURI(favorite DIDLItem) string {
 	if err != nil || len(items) == 0 {
 		return ""
 	}
-	return items[0].URI
+	return safeURIDecode(items[0].URI)
+}
+
+// safeURIDecode removes one layer of double-percent-encoding from uri.
+// Sonos favorites often come back double-encoded from the ContentDirectory
+// (e.g. %253a instead of %3a). One QueryUnescape pass normalises them to the
+// single-encoded form that AVTransport expects.
+// The decode is only applied when %25 is present (sign of double-encoding);
+// already-correct URIs are returned unchanged so we never strip legitimate
+// single-encoding.
+func safeURIDecode(uri string) string {
+	if !strings.Contains(uri, "%25") {
+		return uri
+	}
+	decoded, err := url.QueryUnescape(uri)
+	if err != nil {
+		return uri
+	}
+	return decoded
 }

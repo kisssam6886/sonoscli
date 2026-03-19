@@ -1,6 +1,10 @@
-# 🔊 sonoscli — Discover, group, and control Sonos
+# 🔊 sonoscli-plus — Discover, group, and control Sonos
 
-`sonoscli` is a modern Go CLI to control Sonos speakers over your local network (UPnP/SOAP).
+`sonoscli-plus` is Sam 本地维护的 Sonos CLI 增强版 fork，基于 `sonoscli` 扩展。
+
+项目方向：把它逐步做成一个 **Sonos × 网易云音乐的稳定能力层 / control layer**，方便任何 agent（OpenClaw、Telegram bot、Discord bot、Web agent 等）通过标准参数和 JSON 输出来调用，而不需要理解 Sonos/SMAPI 底层细节。
+
+当前额外保留的播放模式命令：`mode get` / `mode shuffle` / `mode shuffle-norepeat` / `mode repeat` / `mode repeat-one` / `mode normal`。
 
 ## Features
 
@@ -17,6 +21,21 @@
   - Optional Spotify Web API search (client credentials) if you want it.
 - **Live events**: `watch` subscribes to AVTransport + RenderingControl and prints changes.
 - **Scriptable output**: `--format plain|json|tsv` plus `--debug` tracing.
+- **sonoscli-plus extras**:
+  - `mode get|shuffle|shuffle-norepeat|repeat|repeat-one|normal`
+  - `say <text>` for TTS announcement playback (macOS auto-TTS), with `--lang zh|yue`, `--voice`, `--style`, or `--audio-uri <url>` override
+  - `schedule add|list|remove|run|serve` for local schedule planning/execution (MVP)
+  - `tv` / `music` for switching between TV input and Sonos music queue mode
+  - `ncm categories|browse|search|play|lucky|auth ...` for 网易云音乐 via Sonos SMAPI
+  - `ncm play/lucky` now rebuilds the Sonos queue with matching tracks before playback
+  - repaired NCM queue metadata so Sonos queue titles/artist/album render correctly
+  - improved NCM queue start reliability when transport gets stuck in `TRANSITIONING`
+  - built-in alias normalization for common names like `Sammi`/`Eason`/`Jay`/`GEM`
+  - agent-facing design notes: `docs/agent-interface-v1.md`
+  - JSON schema draft: `docs/json-schema-v1.md`
+  - agent onboarding guide: `docs/agent-quickstart.md`
+  - queue request draft: `docs/queue-request-v1.md`
+  - service adapter draft: `docs/service-adapter-v1.md`
 
 This is not an official Sonos project.
 
@@ -447,3 +466,4 @@ See [`docs/spec.md`](docs/spec.md).
 ## License
 
 MIT License. See [`LICENSE`](LICENSE).
+ICENSE).

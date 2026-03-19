@@ -4,6 +4,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func writeTransportExecutionOK(cmd *cobra.Command, flags *rootFlags, action, coordinatorIP string) error {
+	return writeExecutionOK(cmd, flags, action, newExecutionOutput("transport", action, executionTargetFromFlags(flags), nil, map[string]any{
+		"coordinatorIP": coordinatorIP,
+	}), map[string]any{
+		"coordinatorIP": coordinatorIP,
+	})
+}
+
 func newPlayCmd(flags *rootFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "play",
@@ -18,7 +26,7 @@ func newPlayCmd(flags *rootFlags) *cobra.Command {
 			if err := c.Play(ctx); err != nil {
 				return err
 			}
-			return writeOK(cmd, flags, "play", map[string]any{"coordinatorIP": c.IP})
+			return writeTransportExecutionOK(cmd, flags, "play", c.IP)
 		},
 	}
 
@@ -40,7 +48,7 @@ func newPauseCmd(flags *rootFlags) *cobra.Command {
 			if err := c.Pause(ctx); err != nil {
 				return err
 			}
-			return writeOK(cmd, flags, "pause", map[string]any{"coordinatorIP": c.IP})
+			return writeTransportExecutionOK(cmd, flags, "pause", c.IP)
 		},
 	}
 }
@@ -59,7 +67,7 @@ func newStopCmd(flags *rootFlags) *cobra.Command {
 			if err := c.StopOrNoop(ctx); err != nil {
 				return err
 			}
-			return writeOK(cmd, flags, "stop", map[string]any{"coordinatorIP": c.IP})
+			return writeTransportExecutionOK(cmd, flags, "stop", c.IP)
 		},
 	}
 }
@@ -78,7 +86,7 @@ func newNextCmd(flags *rootFlags) *cobra.Command {
 			if err := c.Next(ctx); err != nil {
 				return err
 			}
-			return writeOK(cmd, flags, "next", map[string]any{"coordinatorIP": c.IP})
+			return writeTransportExecutionOK(cmd, flags, "next", c.IP)
 		},
 	}
 }
@@ -97,7 +105,7 @@ func newPrevCmd(flags *rootFlags) *cobra.Command {
 			if err := c.PreviousOrRestart(ctx); err != nil {
 				return err
 			}
-			return writeOK(cmd, flags, "prev", map[string]any{"coordinatorIP": c.IP})
+			return writeTransportExecutionOK(cmd, flags, "prev", c.IP)
 		},
 	}
 }

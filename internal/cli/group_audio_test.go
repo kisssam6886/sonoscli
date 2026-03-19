@@ -90,7 +90,7 @@ func TestGroupVolumeGetJSON(t *testing.T) {
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(out.String(), "\"volume\": 7") {
+	if !strings.Contains(out.String(), "\"action\": \"group.volume.get\"") || !strings.Contains(out.String(), "\"capability\": \"group.volume\"") || !strings.Contains(out.String(), "\"operation\": \"get\"") || !strings.Contains(out.String(), "\"volume\": 7") {
 		t.Fatalf("unexpected output: %s", out.String())
 	}
 }
@@ -194,7 +194,7 @@ func TestGroupMuteOnJSON(t *testing.T) {
 	if fake.setMuteCalls != 1 || fake.setMuteValue != true {
 		t.Fatalf("expected set mute=true once, got calls=%d val=%v", fake.setMuteCalls, fake.setMuteValue)
 	}
-	if !strings.Contains(out.String(), `"action": "group.mute.on"`) {
+	if !strings.Contains(out.String(), `"action": "group.mute.on"`) || !strings.Contains(out.String(), `"capability": "group.mute"`) || !strings.Contains(out.String(), `"operation": "set"`) {
 		t.Fatalf("unexpected output: %q", out.String())
 	}
 }

@@ -40,7 +40,9 @@ func anySpeakerClient(ctx context.Context, flags *rootFlags) (*sonos.Client, err
 		return nil, err
 	}
 	if len(devs) == 0 {
-		return nil, errors.New("no speakers found")
+		return nil, newTargetNotFoundError("no speakers found", flags, map[string]any{
+			"resolution": "discover",
+		})
 	}
 	if strings.TrimSpace(flags.Name) == "" {
 		return newSonosClient(devs[0].IP, flags.Timeout), nil
@@ -66,7 +68,10 @@ func anySpeakerClient(ctx context.Context, flags *rootFlags) (*sonos.Client, err
 	if ok && mem.IP != "" {
 		return newSonosClient(mem.IP, flags.Timeout), nil
 	}
-	return nil, errors.New("speaker name not found: " + flags.Name)
+	return nil, newTargetNotFoundError("speaker name not found: "+flags.Name, flags, map[string]any{
+		"resolution": "topology",
+		"room":       strings.TrimSpace(flags.Name),
+	})
 }
 
 func newSMAPIServicesCmd(flags *rootFlags) *cobra.Command {
@@ -168,7 +173,7 @@ func newSMAPIAuthCmd(flags *rootFlags) *cobra.Command {
 func findServiceByName(services []sonos.MusicServiceDescriptor, name string) (sonos.MusicServiceDescriptor, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return sonos.MusicServiceDescriptor{}, errors.New("--service is required")
+		return sonos.MusicServiceDescriptor{}, newServiceRequiredError()
 	}
 	var exact *sonos.MusicServiceDescriptor
 	for i := range services {
@@ -197,9 +202,17 @@ func findServiceByName(services []sonos.MusicServiceDescriptor, name string) (so
 			names = append(names, m.Name)
 		}
 		sort.Strings(names)
-		return sonos.MusicServiceDescriptor{}, fmt.Errorf("ambiguous --service %q; matches: %s", name, strings.Join(names, ", "))
+		return sonos.MusicServiceDescriptor{}, newServiceAmbiguousError(name, names)
 	}
-	return sonos.MusicServiceDescriptor{}, errors.New("service not found: " + name)
+	available := make([]string, 0, len(services))
+	for _, s := range services {
+		if strings.TrimSpace(s.Name) == "" {
+			continue
+		}
+		available = append(available, strings.TrimSpace(s.Name))
+	}
+	sort.Strings(available)
+	return sonos.MusicServiceDescriptor{}, newServiceNotFoundError(name, available)
 }
 
 func newSMAPIAuthBeginCmd(flags *rootFlags) *cobra.Command {
@@ -236,7 +249,15 @@ func newSMAPIAuthBeginCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			if isJSON(flags) {
-				return writeJSON(cmd, map[string]any{
+				return writeExecutionOK(cmd, flags, "auth.smapi.begin", newExecutionOutput("auth.smapi", "begin", executionTargetFromFlags(flags), map[string]any{
+					"service": spotifyServiceExecutionFields(svc),
+				}, map[string]any{
+					"speakerIP":  speaker.IP,
+					"service":    spotifyServiceExecutionFields(svc),
+					"linkCode":   res.LinkCode,
+					"regURL":     res.RegURL,
+					"linkDevice": res.LinkDeviceID,
+				}), map[string]any{
 					"speakerIP": speaker.IP,
 					"service":   svc,
 					"auth":      res,
@@ -296,6 +317,12 @@ func newSMAPIAuthCompleteCmd(flags *rootFlags) *cobra.Command {
 			pair, err := completeSMAPIAuth(ctx, wait, func(ctx context.Context) (sonos.SMAPITokenPair, error) {
 				attempts++
 				pair, err := sm.CompleteAuthentication(ctx, linkCode, linkDeviceID)
+				if err != nil && isSMAPIEmptyTokenPair(err) {
+					fallbackPair, fallbackErr := tolerateSMAPIEmptyTokenPair(ctx, store, sm)
+					if fallbackErr == nil {
+						return fallbackPair, nil
+					}
+				}
 				if wait > 0 && !isJSON(flags) && isSMAPILinkPending(err) {
 					if !printedWaitHint {
 						_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Waiting for linking to complete...")
@@ -322,7 +349,18 @@ func newSMAPIAuthCompleteCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			if isJSON(flags) {
-				return writeJSON(cmd, map[string]any{
+				return writeExecutionOK(cmd, flags, "auth.smapi.complete", newExecutionOutput("auth.smapi", "complete", executionTargetFromFlags(flags), map[string]any{
+					"service":      spotifyServiceExecutionFields(svc),
+					"code":         linkCode,
+					"linkDeviceID": linkDeviceID,
+					"wait":         wait.String(),
+				}, map[string]any{
+					"speakerIP":  speaker.IP,
+					"service":    spotifyServiceExecutionFields(svc),
+					"updatedAt":  pair.UpdatedAt,
+					"authToken":  pair.AuthToken,
+					"privateKey": pair.PrivateKey,
+				}), map[string]any{
 					"speakerIP": speaker.IP,
 					"service":   svc,
 					"token":     pair,
@@ -412,14 +450,48 @@ func isSMAPIInvalidLinkCode(err error) bool {
 	return strings.Contains(strings.ToLower(msg), "invalid linkcode")
 }
 
+func isSMAPIEmptyTokenPair(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "empty token pair")
+}
+
+func tolerateSMAPIEmptyTokenPair(ctx context.Context, store sonos.SMAPITokenStore, sm *sonos.SMAPIClient) (sonos.SMAPITokenPair, error) {
+	if store != nil {
+		if pair, ok, err := store.Load(sm.Service.ID, sm.HouseholdID); err == nil && ok {
+			if pair.UpdatedAt.IsZero() {
+				pair.UpdatedAt = time.Now().UTC()
+			}
+			return pair, nil
+		}
+	}
+
+	cats, err := sm.SearchCategories(ctx)
+	if err != nil || len(cats) == 0 {
+		if err != nil {
+			return sonos.SMAPITokenPair{}, err
+		}
+		return sonos.SMAPITokenPair{}, errors.New("empty token pair in response")
+	}
+
+	return sonos.SMAPITokenPair{
+		UpdatedAt:   time.Now().UTC(),
+		LinkCode:    "session-linked",
+		DeviceID:    sm.DeviceID,
+		HouseholdID: sm.HouseholdID,
+	}, nil
+}
+
 func newSMAPISearchCmd(flags *rootFlags) *cobra.Command {
 	var (
-		serviceName string
-		category    string
-		limit       int
-		doOpen      bool
-		doEnqueue   bool
-		index       int
+		serviceName    string
+		category       string
+		limit          int
+		doOpen         bool
+		doEnqueue      bool
+		includeBlocked bool
+		index          int
 	)
 
 	cmd := &cobra.Command{
@@ -430,10 +502,14 @@ func newSMAPISearchCmd(flags *rootFlags) *cobra.Command {
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if doOpen && doEnqueue {
-				return errors.New("use only one of --open or --enqueue")
+				return newInvalidArgumentError("use only one of --open or --enqueue", map[string]any{
+					"action": "smapi.search",
+				})
 			}
 			if (doOpen || doEnqueue) && flags.IP == "" && flags.Name == "" {
-				return errors.New("--open/--enqueue require --ip or --name")
+				return newTargetActionRequiredError("--open/--enqueue require --ip or --name", flags, map[string]any{
+					"action": "smapi.search.open_or_enqueue",
+				})
 			}
 			if index <= 0 {
 				index = 1
@@ -467,56 +543,115 @@ func newSMAPISearchCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			flat := append([]sonos.SMAPIItem{}, res.MediaMetadata...)
-			flat = append(flat, res.MediaCollection...)
+			filteredRes := res
+			blockedFiltered := 0
+			if !includeBlocked {
+				_, playability, playabilityErr := loadPlayabilityFile()
+				if playabilityErr != nil {
+					slog.Warn("playability store unavailable", "error", playabilityErr)
+				} else {
+					filteredRes, blockedFiltered = filterBlockedSearchResult(playability, svc, query, res)
+				}
+			}
+			flat := append([]sonos.SMAPIItem{}, filteredRes.MediaMetadata...)
+			flat = append(flat, filteredRes.MediaCollection...)
 			if len(flat) == 0 {
-				return errors.New("no results")
+				message := "no results"
+				if blockedFiltered > 0 && !includeBlocked {
+					message = "no results after blocked items filtered"
+				}
+				return newNoResultsError(message, map[string]any{
+					"action":          "smapi.search",
+					"service":         svc.Name,
+					"query":           query,
+					"category":        category,
+					"blockedFiltered": blockedFiltered,
+				})
 			}
 
+			var playback *queuePlaybackResult
 			if doOpen || doEnqueue {
 				if index > len(flat) {
-					return fmt.Errorf("--index %d out of range (got %d results)", index, len(flat))
+					return newIndexOutOfRangeError(index, len(flat), map[string]any{
+						"action":   "smapi.search",
+						"service":  svc.Name,
+						"query":    query,
+						"category": category,
+					})
 				}
 				selected := flat[index-1]
-				ref := selected.ID
-				if _, ok := sonos.ParseSpotifyRef(ref); !ok {
-					return errors.New("selected result is not a supported Spotify ref: " + ref)
-				}
-				c, err := newSonosEnqueuer(ctx, flags)
+				playback, err = openOrEnqueueSMAPIItem(ctx, flags, svc, selected, doOpen)
 				if err != nil {
-					return err
-				}
-				_, err = c.EnqueueSpotify(ctx, ref, sonos.EnqueueOptions{
-					PlayNow: doOpen,
-				})
-				if err != nil {
+					rememberBlockedSMAPIItem(svc, selected, err)
 					return err
 				}
 			}
 
 			if isJSON(flags) {
+				target := executionTargetFromFlags(flags)
+				if target == nil {
+					target = map[string]any{}
+				}
+				target["speakerIP"] = speaker.IP
+				request := map[string]any{
+					"service":        svc.Name,
+					"serviceID":      svc.ID,
+					"category":       category,
+					"query":          query,
+					"limit":          limit,
+					"index":          index,
+					"open":           doOpen,
+					"enqueue":        doEnqueue,
+					"includeBlocked": includeBlocked,
+				}
 				if doOpen || doEnqueue {
 					selected := flat[index-1]
-					return writeJSON(cmd, map[string]any{
+					out := map[string]any{
 						"speakerIP": speaker.IP,
 						"service":   svc,
 						"category":  category,
 						"query":     query,
-						"result":    res,
+						"result":    filteredRes,
 						"selected":  selected,
-						"action": map[string]any{
+						"playbackAction": map[string]any{
 							"enqueue": true,
 							"playNow": doOpen,
 						},
-					})
+						"blockedFiltered": blockedFiltered,
+					}
+					if playback != nil {
+						out["playback"] = playback
+					}
+					return writeExecutionOK(cmd, flags, "smapi.search", newExecutionOutput("music.smapi", "search", target, request, map[string]any{
+						"selectedID":      strings.TrimSpace(selected.ID),
+						"selectedTitle":   strings.TrimSpace(selected.Title),
+						"count":           len(flat),
+						"playNow":         doOpen,
+						"enqueued":        true,
+						"blockedFiltered": blockedFiltered,
+					}), out)
 				}
-				return writeJSON(cmd, map[string]any{
-					"speakerIP": speaker.IP,
-					"service":   svc,
-					"category":  category,
-					"query":     query,
-					"result":    res,
+				return writeExecutionOK(cmd, flags, "smapi.search", newExecutionOutput("music.smapi", "search", target, request, map[string]any{
+					"count":           len(flat),
+					"blockedFiltered": blockedFiltered,
+				}), map[string]any{
+					"speakerIP":       speaker.IP,
+					"service":         svc,
+					"category":        category,
+					"query":           query,
+					"result":          filteredRes,
+					"blockedFiltered": blockedFiltered,
 				})
+			}
+
+			if doOpen || doEnqueue {
+				selected := flat[index-1]
+				actionLabel := "已加入队列"
+				if doOpen {
+					actionLabel = "已开始播放"
+				}
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s：%s\n", actionLabel, selected.Title)
+				return nil
 			}
 
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 2, 2, ' ', 0)
@@ -537,6 +672,7 @@ func newSMAPISearchCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().IntVar(&limit, "limit", 10, "Max results (1-200 depending on service)")
 	cmd.Flags().BoolVar(&doOpen, "open", false, "Open the selected result on Sonos (requires --name/--ip)")
 	cmd.Flags().BoolVar(&doEnqueue, "enqueue", false, "Enqueue the selected result on Sonos (requires --name/--ip)")
+	cmd.Flags().BoolVar(&includeBlocked, "include-blocked", false, "Include locally blocked track versions in search results")
 	cmd.Flags().IntVar(&index, "index", 1, "Which search result to use with --open/--enqueue (1-based)")
 
 	return cmd
@@ -560,10 +696,14 @@ func newSMAPIBrowseCmd(flags *rootFlags) *cobra.Command {
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if doOpen && doEnqueue {
-				return errors.New("use only one of --open or --enqueue")
+				return newInvalidArgumentError("use only one of --open or --enqueue", map[string]any{
+					"action": "smapi.browse",
+				})
 			}
 			if (doOpen || doEnqueue) && flags.IP == "" && flags.Name == "" {
-				return errors.New("--open/--enqueue require --ip or --name")
+				return newTargetActionRequiredError("--open/--enqueue require --ip or --name", flags, map[string]any{
+					"action": "smapi.browse.open_or_enqueue",
+				})
 			}
 			if index <= 0 {
 				index = 1
@@ -599,45 +739,71 @@ func newSMAPIBrowseCmd(flags *rootFlags) *cobra.Command {
 			flat := append([]sonos.SMAPIItem{}, res.MediaCollection...)
 			flat = append(flat, res.MediaMetadata...)
 			if len(flat) == 0 {
-				return errors.New("no results")
+				return newNoResultsError("no results", map[string]any{
+					"action":  "smapi.browse",
+					"service": svc.Name,
+					"id":      id,
+				})
 			}
 
+			var playback *queuePlaybackResult
 			if doOpen || doEnqueue {
 				if index > len(flat) {
-					return fmt.Errorf("--index %d out of range (got %d results)", index, len(flat))
+					return newIndexOutOfRangeError(index, len(flat), map[string]any{
+						"action":  "smapi.browse",
+						"service": svc.Name,
+						"id":      id,
+					})
 				}
 				selected := flat[index-1]
-				ref := selected.ID
-				if _, ok := sonos.ParseSpotifyRef(ref); !ok {
-					return errors.New("selected result is not a supported Spotify ref: " + ref)
-				}
-				c, err := newSonosEnqueuer(ctx, flags)
-				if err != nil {
-					return err
-				}
-				_, err = c.EnqueueSpotify(ctx, ref, sonos.EnqueueOptions{
-					PlayNow: doOpen,
-				})
+				playback, err = openOrEnqueueSMAPIItem(ctx, flags, svc, selected, doOpen)
 				if err != nil {
 					return err
 				}
 			}
 
 			if isJSON(flags) {
+				target := executionTargetFromFlags(flags)
+				if target == nil {
+					target = map[string]any{}
+				}
+				target["speakerIP"] = speaker.IP
+				request := map[string]any{
+					"service":   svc.Name,
+					"serviceID": svc.ID,
+					"id":        id,
+					"limit":     limit,
+					"recursive": recursive,
+					"index":     index,
+					"open":      doOpen,
+					"enqueue":   doEnqueue,
+				}
 				if doOpen || doEnqueue {
 					selected := flat[index-1]
-					return writeJSON(cmd, map[string]any{
+					out := map[string]any{
 						"speakerIP": speaker.IP,
 						"service":   svc,
 						"browse":    res,
 						"selected":  selected,
-						"action": map[string]any{
+						"playbackAction": map[string]any{
 							"enqueue": true,
 							"playNow": doOpen,
 						},
-					})
+					}
+					if playback != nil {
+						out["playback"] = playback
+					}
+					return writeExecutionOK(cmd, flags, "smapi.browse", newExecutionOutput("music.smapi", "browse", target, request, map[string]any{
+						"selectedID":    strings.TrimSpace(selected.ID),
+						"selectedTitle": strings.TrimSpace(selected.Title),
+						"count":         len(flat),
+						"playNow":       doOpen,
+						"enqueued":      true,
+					}), out)
 				}
-				return writeJSON(cmd, map[string]any{
+				return writeExecutionOK(cmd, flags, "smapi.browse", newExecutionOutput("music.smapi", "browse", target, request, map[string]any{
+					"count": len(flat),
+				}), map[string]any{
 					"speakerIP": speaker.IP,
 					"service":   svc,
 					"browse":    res,
@@ -666,4 +832,52 @@ func newSMAPIBrowseCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().IntVar(&index, "index", 1, "Which result to use with --open/--enqueue (1-based)")
 
 	return cmd
+}
+
+func openOrEnqueueSMAPIItem(ctx context.Context, flags *rootFlags, svc sonos.MusicServiceDescriptor, selected sonos.SMAPIItem, playNow bool) (*queuePlaybackResult, error) {
+	ref := strings.TrimSpace(selected.ID)
+	if ref == "" {
+		return nil, errors.New("selected result has empty id")
+	}
+
+	if _, ok := sonos.ParseSpotifyRef(ref); ok {
+		c, err := newSonosEnqueuer(ctx, flags)
+		if err != nil {
+			return nil, err
+		}
+		_, err = c.EnqueueSpotify(ctx, ref, sonos.EnqueueOptions{PlayNow: playNow})
+		return nil, err
+	}
+
+	// NetEase SMAPI track support (service id 165): queue native track uri instead of direct play-uri.
+	if strings.EqualFold(strings.TrimSpace(svc.ID), "165") {
+		id := strings.ToUpper(ref)
+		if strings.HasPrefix(id, "SONG:") {
+			c, err := coordinatorClient(ctx, flags)
+			if err != nil {
+				return nil, err
+			}
+			playback, err := executeQueuePlayback(ctx, c, []queuePlaybackItem{{
+				ID:    ref,
+				Title: selected.Title,
+				URI:   buildNCMTrackURI(ref),
+				Metadata: buildNCMQueueTrackMeta(smapiLikeItem{
+					ID:     ref,
+					Title:  selected.Title,
+					Artist: selected.TrackMetadata.Artist,
+					Album:  selected.TrackMetadata.Album,
+				}),
+			}}, queuePlaybackOptions{
+				Source:        "netease.smapi",
+				PlayNow:       playNow,
+				SelectedIndex: 0,
+			})
+			if err != nil {
+				return nil, err
+			}
+			return &playback, nil
+		}
+	}
+
+	return nil, fmt.Errorf("selected result is not auto-playable for service %q: %s", strings.TrimSpace(svc.Name), ref)
 }

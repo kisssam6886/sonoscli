@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 
@@ -44,7 +43,9 @@ func newGroupVolumeCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			if isJSON(flags) {
-				return writeJSON(cmd, map[string]int{"volume": v})
+				return writeExecutionOK(cmd, flags, "group.volume.get", newExecutionOutput("group.volume", "get", executionTargetFromFlags(flags), nil, map[string]any{
+					"volume": v,
+				}), map[string]any{"volume": v})
 			}
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(), v)
 			return nil
@@ -62,7 +63,10 @@ func newGroupVolumeCmd(flags *rootFlags) *cobra.Command {
 			}
 			v, err := strconv.Atoi(args[0])
 			if err != nil {
-				return err
+				return newInvalidArgumentError("volume must be an integer", map[string]any{
+					"action": "group.volume.set",
+					"value":  args[0],
+				})
 			}
 			c, err := newGroupAudioClient(cmd.Context(), flags)
 			if err != nil {
@@ -71,7 +75,11 @@ func newGroupVolumeCmd(flags *rootFlags) *cobra.Command {
 			if err := c.SetGroupVolume(cmd.Context(), v); err != nil {
 				return err
 			}
-			return writeOK(cmd, flags, "group.volume.set", map[string]any{"volume": v})
+			return writeExecutionOK(cmd, flags, "group.volume.set", newExecutionOutput("group.volume", "set", executionTargetFromFlags(flags), map[string]any{
+				"volume": v,
+			}, map[string]any{
+				"volume": v,
+			}), map[string]any{"volume": v})
 		},
 	})
 
@@ -102,7 +110,9 @@ func newGroupMuteCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			if isJSON(flags) {
-				return writeJSON(cmd, map[string]bool{"mute": m})
+				return writeExecutionOK(cmd, flags, "group.mute.get", newExecutionOutput("group.mute", "get", executionTargetFromFlags(flags), nil, map[string]any{
+					"mute": m,
+				}), map[string]any{"mute": m})
 			}
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(), m)
 			return nil
@@ -124,7 +134,11 @@ func newGroupMuteCmd(flags *rootFlags) *cobra.Command {
 			if err := c.SetGroupMute(cmd.Context(), true); err != nil {
 				return err
 			}
-			return writeOK(cmd, flags, "group.mute.on", map[string]any{"mute": true})
+			return writeExecutionOK(cmd, flags, "group.mute.on", newExecutionOutput("group.mute", "set", executionTargetFromFlags(flags), map[string]any{
+				"mute": true,
+			}, map[string]any{
+				"mute": true,
+			}), map[string]any{"mute": true})
 		},
 	})
 
@@ -143,7 +157,11 @@ func newGroupMuteCmd(flags *rootFlags) *cobra.Command {
 			if err := c.SetGroupMute(cmd.Context(), false); err != nil {
 				return err
 			}
-			return writeOK(cmd, flags, "group.mute.off", map[string]any{"mute": false})
+			return writeExecutionOK(cmd, flags, "group.mute.off", newExecutionOutput("group.mute", "set", executionTargetFromFlags(flags), map[string]any{
+				"mute": false,
+			}, map[string]any{
+				"mute": false,
+			}), map[string]any{"mute": false})
 		},
 	})
 
@@ -166,7 +184,9 @@ func newGroupMuteCmd(flags *rootFlags) *cobra.Command {
 			if err := c.SetGroupMute(cmd.Context(), !m); err != nil {
 				return err
 			}
-			return writeOK(cmd, flags, "group.mute.toggle", map[string]any{"mute": !m})
+			return writeExecutionOK(cmd, flags, "group.mute.toggle", newExecutionOutput("group.mute", "toggle", executionTargetFromFlags(flags), nil, map[string]any{
+				"mute": !m,
+			}), map[string]any{"mute": !m})
 		},
 	})
 
@@ -188,7 +208,10 @@ func newGroupMuteCmd(flags *rootFlags) *cobra.Command {
 			case "off", "false", "0":
 				mute = false
 			default:
-				return errors.New("invalid value: " + val)
+				return newInvalidArgumentError("invalid value: "+val, map[string]any{
+					"action": "group.mute.set",
+					"value":  val,
+				})
 			}
 			c, err := newGroupAudioClient(cmd.Context(), flags)
 			if err != nil {
@@ -197,7 +220,11 @@ func newGroupMuteCmd(flags *rootFlags) *cobra.Command {
 			if err := c.SetGroupMute(cmd.Context(), mute); err != nil {
 				return err
 			}
-			return writeOK(cmd, flags, "group.mute.set", map[string]any{"mute": mute})
+			return writeExecutionOK(cmd, flags, "group.mute.set", newExecutionOutput("group.mute", "set", executionTargetFromFlags(flags), map[string]any{
+				"mute": mute,
+			}, map[string]any{
+				"mute": mute,
+			}), map[string]any{"mute": mute})
 		},
 	})
 

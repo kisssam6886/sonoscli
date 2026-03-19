@@ -31,6 +31,20 @@ func TestAVTransportQueueAndInfoCalls(t *testing.T) {
     </u:GetPositionInfoResponse>
   </s:Body>
 </s:Envelope>`), nil
+		case strings.Contains(action, "#GetMediaInfo"):
+			return httpResponse(200, `<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+  <s:Body>
+    <u:GetMediaInfoResponse xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
+      <NrTracks>12</NrTracks>
+      <MediaDuration>0:42:00</MediaDuration>
+      <CurrentURI>x-rincon-queue:RINCON_ABC1400#0</CurrentURI>
+      <CurrentURIMetaData>&lt;DIDL-Lite/&gt;</CurrentURIMetaData>
+      <NextURI></NextURI>
+      <NextURIMetaData></NextURIMetaData>
+    </u:GetMediaInfoResponse>
+  </s:Body>
+</s:Envelope>`), nil
 		case strings.Contains(action, "#GetTransportInfo"):
 			return httpResponse(200, `<?xml version="1.0"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
@@ -69,6 +83,14 @@ func TestAVTransportQueueAndInfoCalls(t *testing.T) {
 	}
 	if pos.Track != "5" || pos.TrackDuration != "0:03:21" || pos.RelTime != "0:00:10" {
 		t.Fatalf("unexpected position info: %+v", pos)
+	}
+
+	media, err := c.GetMediaInfo(context.Background())
+	if err != nil {
+		t.Fatalf("GetMediaInfo: %v", err)
+	}
+	if media.CurrentURI != "x-rincon-queue:RINCON_ABC1400#0" || media.NrTracks != "12" {
+		t.Fatalf("unexpected media info: %+v", media)
 	}
 
 	ti, err := c.GetTransportInfo(context.Background())

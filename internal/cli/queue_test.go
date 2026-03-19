@@ -87,6 +87,34 @@ func TestQueueListPrintsTable(t *testing.T) {
 	}
 }
 
+func TestQueueListJSONIncludesExecutionEnvelope(t *testing.T) {
+	flags := &rootFlags{Name: "Kitchen", Timeout: 2 * time.Second, Format: formatJSON}
+	cmd := newQueueListCmd(flags)
+
+	orig := newQueueClient
+	t.Cleanup(func() { newQueueClient = orig })
+
+	fc := &fakeQueueClient{
+		page: sonos.QueuePage{
+			Items: []sonos.QueueItem{
+				{Position: 1, Item: sonos.DIDLItem{Title: "Song 1", URI: "x://1"}},
+			},
+			NumberReturned: 1,
+			TotalMatches:   1,
+			UpdateID:       99,
+		},
+	}
+	newQueueClient = func(ctx context.Context, flags *rootFlags) (queueClient, error) { return fc, nil }
+
+	out, err := execute(t, cmd)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "\"action\": \"queue.list\"") || !strings.Contains(out, "\"capability\": \"queue\"") {
+		t.Fatalf("unexpected output: %s", out)
+	}
+}
+
 func TestQueuePlayCallsClient(t *testing.T) {
 	flags := &rootFlags{Name: "Kitchen", Timeout: 2 * time.Second}
 	cmd := newQueuePlayCmd(flags)
@@ -153,6 +181,25 @@ func TestQueueClearCallsClient(t *testing.T) {
 	}
 	if fc.clearCalls != 1 {
 		t.Fatalf("expected clear call")
+	}
+}
+
+func TestQueueClearJSONIncludesExecutionEnvelope(t *testing.T) {
+	flags := &rootFlags{Name: "Kitchen", Timeout: 2 * time.Second, Format: formatJSON}
+	cmd := newQueueClearCmd(flags)
+
+	orig := newQueueClient
+	t.Cleanup(func() { newQueueClient = orig })
+
+	fc := &fakeQueueClient{}
+	newQueueClient = func(ctx context.Context, flags *rootFlags) (queueClient, error) { return fc, nil }
+
+	out, err := execute(t, cmd)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "\"action\": \"queue.clear\"") || !strings.Contains(out, "\"operation\": \"clear\"") {
+		t.Fatalf("unexpected output: %s", out)
 	}
 }
 

@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"text/tabwriter"
@@ -58,7 +57,19 @@ func newQueueListCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			if isJSON(flags) {
-				return writeJSON(cmd, page)
+				return writeExecutionOK(cmd, flags, "queue.list", newExecutionOutput("queue", "list", executionTargetFromFlags(flags), map[string]any{
+					"start": start,
+					"limit": limit,
+				}, map[string]any{
+					"numberReturned": page.NumberReturned,
+					"totalMatches":   page.TotalMatches,
+					"updateID":       page.UpdateID,
+				}), map[string]any{
+					"items":          page.Items,
+					"numberReturned": page.NumberReturned,
+					"totalMatches":   page.TotalMatches,
+					"updateID":       page.UpdateID,
+				})
 			}
 			if isTSV(flags) {
 				for _, qi := range page.Items {
@@ -106,7 +117,9 @@ func newQueueClearCmd(flags *rootFlags) *cobra.Command {
 			if err := c.ClearQueue(ctx); err != nil {
 				return err
 			}
-			return writeOK(cmd, flags, "queue.clear", nil)
+			return writeExecutionOK(cmd, flags, "queue.clear", newExecutionOutput("queue", "clear", executionTargetFromFlags(flags), nil, map[string]any{
+				"cleared": true,
+			}), nil)
 		},
 	}
 	return cmd
@@ -124,7 +137,10 @@ func newQueuePlayCmd(flags *rootFlags) *cobra.Command {
 			}
 			pos, err := strconv.Atoi(args[0])
 			if err != nil {
-				return errors.New("pos must be an integer (1-based)")
+				return newInvalidArgumentError("pos must be an integer (1-based)", map[string]any{
+					"action": "queue.play",
+					"pos":    args[0],
+				})
 			}
 			ctx := cmd.Context()
 			c, err := newQueueClient(ctx, flags)
@@ -134,7 +150,11 @@ func newQueuePlayCmd(flags *rootFlags) *cobra.Command {
 			if err := c.PlayQueuePosition(ctx, pos); err != nil {
 				return err
 			}
-			return writeOK(cmd, flags, "queue.play", map[string]any{"pos": pos})
+			return writeExecutionOK(cmd, flags, "queue.play", newExecutionOutput("queue", "play", executionTargetFromFlags(flags), map[string]any{
+				"pos": pos,
+			}, map[string]any{
+				"pos": pos,
+			}), map[string]any{"pos": pos})
 		},
 	}
 	return cmd
@@ -152,7 +172,10 @@ func newQueueRemoveCmd(flags *rootFlags) *cobra.Command {
 			}
 			pos, err := strconv.Atoi(args[0])
 			if err != nil {
-				return errors.New("pos must be an integer (1-based)")
+				return newInvalidArgumentError("pos must be an integer (1-based)", map[string]any{
+					"action": "queue.remove",
+					"pos":    args[0],
+				})
 			}
 			ctx := cmd.Context()
 			c, err := newQueueClient(ctx, flags)
@@ -162,7 +185,11 @@ func newQueueRemoveCmd(flags *rootFlags) *cobra.Command {
 			if err := c.RemoveQueuePosition(ctx, pos); err != nil {
 				return err
 			}
-			return writeOK(cmd, flags, "queue.remove", map[string]any{"pos": pos})
+			return writeExecutionOK(cmd, flags, "queue.remove", newExecutionOutput("queue", "remove", executionTargetFromFlags(flags), map[string]any{
+				"pos": pos,
+			}, map[string]any{
+				"pos": pos,
+			}), map[string]any{"pos": pos})
 		},
 	}
 	return cmd

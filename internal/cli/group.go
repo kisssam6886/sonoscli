@@ -29,13 +29,24 @@ var newTopologyGetter = func(ctx context.Context, timeout time.Duration) (topolo
 		return nil, err
 	}
 	if len(devs) == 0 {
-		return nil, errors.New("no speakers found")
+		return nil, newTargetNotFoundError("no speakers found", nil, map[string]any{
+			"action":     "group.topology",
+			"resolution": "discover",
+		})
 	}
 	return sonos.NewClient(devs[0].IP, timeout), nil
 }
 
 var newGroupingClient = func(ip string, timeout time.Duration) groupingClient {
 	return sonos.NewClient(ip, timeout)
+}
+
+func executionGroupFields(group sonos.Group) map[string]any {
+	return compactMap(map[string]any{
+		"id":          strings.TrimSpace(group.ID),
+		"coordinator": executionMemberFields(group.Coordinator),
+		"memberCount": len(group.Members),
+	})
 }
 
 func newGroupCmd(flags *rootFlags) *cobra.Command {
@@ -83,7 +94,15 @@ func newGroupStatusCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			if isJSON(flags) {
-				return writeJSON(cmd, top)
+				return writeExecutionOK(cmd, flags, "group.status", newExecutionOutput("group", "status", nil, map[string]any{
+					"all": all,
+				}, map[string]any{
+					"groupCount": len(top.Groups),
+				}), map[string]any{
+					"groups": top.Groups,
+					"byName": top.ByName,
+					"byIP":   top.ByIP,
+				})
 			}
 			if isTSV(flags) {
 				for _, g := range top.Groups {
@@ -139,7 +158,10 @@ func newGroupJoinCmd(flags *rootFlags) *cobra.Command {
 			}
 			to = strings.TrimSpace(to)
 			if to == "" {
-				return errors.New("--to is required")
+				return newInvalidArgumentError("--to is required", map[string]any{
+					"action": "group.join",
+					"flag":   "to",
+				})
 			}
 
 			tg, err := newTopologyGetter(cmd.Context(), flags.Timeout)
@@ -163,25 +185,45 @@ func newGroupJoinCmd(flags *rootFlags) *cobra.Command {
 			joinerGroup, _ := top.GroupForIP(joiner.IP)
 			destGroup, ok := top.GroupForIP(dest.IP)
 			if !ok {
-				return errors.New("destination speaker not found in any group")
+				return newStateInconsistentError("destination speaker not found in any group", map[string]any{
+					"action":    "group.join",
+					"speaker":   dest.Name,
+					"speakerIP": dest.IP,
+				})
 			}
 
 			if joinerGroup.ID != "" && joinerGroup.ID == destGroup.ID {
-				return writeOK(cmd, flags, "group.join", map[string]any{
+				return writeExecutionOK(cmd, flags, "group.join", newExecutionOutput("group", "join", executionTargetFromFlags(flags), map[string]any{
+					"to": executionMemberFields(dest),
+				}, map[string]any{
+					"joiner":  executionMemberFields(joiner),
+					"to":      executionMemberFields(dest),
+					"skipped": true,
+				}), map[string]any{
 					"joiner":  joiner,
 					"to":      dest,
 					"skipped": true,
 				})
 			}
 			if destGroup.Coordinator.UUID == "" {
-				return errors.New("destination group coordinator UUID missing")
+				return newStateInconsistentError("destination group coordinator UUID missing", map[string]any{
+					"action":    "group.join",
+					"speaker":   dest.Name,
+					"speakerIP": dest.IP,
+					"groupID":   destGroup.ID,
+				})
 			}
 
 			c := newGroupingClient(joiner.IP, flags.Timeout)
 			if err := c.JoinGroup(cmd.Context(), destGroup.Coordinator.UUID); err != nil {
 				return err
 			}
-			return writeOK(cmd, flags, "group.join", map[string]any{
+			return writeExecutionOK(cmd, flags, "group.join", newExecutionOutput("group", "join", executionTargetFromFlags(flags), map[string]any{
+				"to": executionMemberFields(dest),
+			}, map[string]any{
+				"joiner": executionMemberFields(joiner),
+				"to":     executionMemberFields(dest),
+			}), map[string]any{
 				"joiner": joiner,
 				"to":     dest,
 			})
@@ -189,7 +231,6 @@ func newGroupJoinCmd(flags *rootFlags) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&to, "to", "", "Destination speaker name or IP to join")
-	_ = cmd.MarkFlagRequired("to")
 	return cmd
 }
 
@@ -220,7 +261,9 @@ func newGroupUnjoinCmd(flags *rootFlags) *cobra.Command {
 			if err := c.LeaveGroup(cmd.Context()); err != nil {
 				return err
 			}
-			return writeOK(cmd, flags, "group.unjoin", map[string]any{"member": member})
+			return writeExecutionOK(cmd, flags, "group.unjoin", newExecutionOutput("group", "unjoin", executionTargetFromFlags(flags), nil, map[string]any{
+				"member": executionMemberFields(member),
+			}), map[string]any{"member": member})
 		},
 	}
 	return cmd
@@ -252,7 +295,11 @@ func newGroupSoloCmd(flags *rootFlags) *cobra.Command {
 			}
 			group, ok := top.GroupForIP(target.IP)
 			if !ok {
-				return errors.New("speaker not found in any group")
+				return newStateInconsistentError("speaker not found in any group", map[string]any{
+					"action":    "group.solo",
+					"speaker":   target.Name,
+					"speakerIP": target.IP,
+				})
 			}
 
 			var others []sonos.Member
@@ -290,11 +337,18 @@ func newGroupSoloCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			if len(errs) > 0 {
-				return errors.Join(errs...)
+				return newGroupPartialFailureError("group.solo", results, errs, map[string]any{
+					"target": target,
+					"group":  group,
+				})
 			}
 
 			if isJSON(flags) {
-				return writeJSON(cmd, map[string]any{"target": target, "group": group, "results": results})
+				return writeExecutionOK(cmd, flags, "group.solo", newExecutionOutput("group", "solo", executionTargetFromFlags(flags), nil, map[string]any{
+					"target":   executionMemberFields(target),
+					"group":    executionGroupFields(group),
+					"affected": len(results),
+				}), map[string]any{"target": target, "group": group, "results": results})
 			}
 			return nil
 		},
@@ -310,6 +364,50 @@ type groupOpResult struct {
 	Error   string `json:"error,omitempty"`
 }
 
+type groupOpFailure struct {
+	Target string `json:"target"`
+	IP     string `json:"ip"`
+	Error  string `json:"error"`
+}
+
+func newGroupPartialFailureError(action string, results []groupOpResult, errs []error, fields map[string]any) error {
+	failures := make([]groupOpFailure, 0, len(results))
+	attempted := 0
+	succeeded := 0
+	skipped := 0
+
+	for _, result := range results {
+		if result.Skipped {
+			skipped++
+			continue
+		}
+		attempted++
+		if strings.TrimSpace(result.Error) != "" {
+			failures = append(failures, groupOpFailure{
+				Target: result.Target,
+				IP:     result.IP,
+				Error:  result.Error,
+			})
+			continue
+		}
+		succeeded++
+	}
+
+	failed := len(failures)
+	message := fmt.Sprintf("%s partially failed (%d failed, %d succeeded, %d skipped)", action, failed, succeeded, skipped)
+	details := mergeErrorDetails(fields, map[string]any{
+		"action":    action,
+		"attempted": attempted,
+		"succeeded": succeeded,
+		"failed":    failed,
+		"skipped":   skipped,
+		"results":   append([]groupOpResult(nil), results...),
+		"failures":  failures,
+	})
+
+	return newPartialFailureError(message, errors.Join(errs...), details)
+}
+
 func newGroupPartyCmd(flags *rootFlags) *cobra.Command {
 	var to string
 
@@ -321,7 +419,10 @@ func newGroupPartyCmd(flags *rootFlags) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			to = strings.TrimSpace(to)
 			if to == "" {
-				return errors.New("--to is required")
+				return newInvalidArgumentError("--to is required", map[string]any{
+					"action": "group.party",
+					"flag":   "to",
+				})
 			}
 
 			tg, err := newTopologyGetter(cmd.Context(), flags.Timeout)
@@ -339,10 +440,19 @@ func newGroupPartyCmd(flags *rootFlags) *cobra.Command {
 			}
 			destGroup, ok := top.GroupForIP(dest.IP)
 			if !ok {
-				return errors.New("destination speaker not found in any group")
+				return newStateInconsistentError("destination speaker not found in any group", map[string]any{
+					"action":    "group.party",
+					"speaker":   dest.Name,
+					"speakerIP": dest.IP,
+				})
 			}
 			if destGroup.Coordinator.UUID == "" {
-				return errors.New("destination group coordinator UUID missing")
+				return newStateInconsistentError("destination group coordinator UUID missing", map[string]any{
+					"action":    "group.party",
+					"speaker":   dest.Name,
+					"speakerIP": dest.IP,
+					"groupID":   destGroup.ID,
+				})
 			}
 
 			inDest := map[string]struct{}{}
@@ -372,11 +482,18 @@ func newGroupPartyCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			if len(errs) > 0 {
-				return errors.Join(errs...)
+				return newGroupPartialFailureError("group.party", results, errs, map[string]any{
+					"to": dest,
+				})
 			}
 
 			if isJSON(flags) {
-				return writeJSON(cmd, map[string]any{"to": dest, "results": results})
+				return writeExecutionOK(cmd, flags, "group.party", newExecutionOutput("group", "party", nil, map[string]any{
+					"to": executionMemberFields(dest),
+				}, map[string]any{
+					"to":       executionMemberFields(dest),
+					"affected": len(results),
+				}), map[string]any{"to": dest, "results": results})
 			}
 
 			return nil
@@ -384,7 +501,6 @@ func newGroupPartyCmd(flags *rootFlags) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&to, "to", "", "Destination speaker name or IP to join")
-	_ = cmd.MarkFlagRequired("to")
 	return cmd
 }
 
@@ -414,7 +530,11 @@ func newGroupDissolveCmd(flags *rootFlags) *cobra.Command {
 			}
 			group, ok := top.GroupForIP(member.IP)
 			if !ok {
-				return errors.New("speaker not found in any group")
+				return newStateInconsistentError("speaker not found in any group", map[string]any{
+					"action":    "group.dissolve",
+					"speaker":   member.Name,
+					"speakerIP": member.IP,
+				})
 			}
 
 			var members []sonos.Member
@@ -444,11 +564,16 @@ func newGroupDissolveCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			if len(errs) > 0 {
-				return errors.Join(errs...)
+				return newGroupPartialFailureError("group.dissolve", results, errs, map[string]any{
+					"group": group,
+				})
 			}
 
 			if isJSON(flags) {
-				return writeJSON(cmd, map[string]any{"group": group, "results": results})
+				return writeExecutionOK(cmd, flags, "group.dissolve", newExecutionOutput("group", "dissolve", executionTargetFromFlags(flags), nil, map[string]any{
+					"group":    executionGroupFields(group),
+					"affected": len(results),
+				}), map[string]any{"group": group, "results": results})
 			}
 
 			return nil
@@ -461,7 +586,10 @@ func resolveMember(top sonos.Topology, name string, ip string) (sonos.Member, er
 	if strings.TrimSpace(ip) != "" {
 		mem, ok := top.FindByIP(strings.TrimSpace(ip))
 		if !ok {
-			return sonos.Member{}, errors.New("speaker ip not found in topology: " + ip)
+			return sonos.Member{}, newTargetNotFoundError("speaker ip not found in topology: "+ip, nil, map[string]any{
+				"resolution": "topology",
+				"speakerIP":  strings.TrimSpace(ip),
+			})
 		}
 		return mem, nil
 	}
@@ -471,7 +599,10 @@ func resolveMember(top sonos.Topology, name string, ip string) (sonos.Member, er
 	if name != "" && net.ParseIP(name) != nil {
 		mem, ok := top.FindByIP(name)
 		if !ok {
-			return sonos.Member{}, errors.New("speaker ip not found in topology: " + name)
+			return sonos.Member{}, newTargetNotFoundError("speaker ip not found in topology: "+name, nil, map[string]any{
+				"resolution": "topology",
+				"speakerIP":  name,
+			})
 		}
 		return mem, nil
 	}
@@ -502,10 +633,16 @@ func resolveMember(top sonos.Topology, name string, ip string) (sonos.Member, er
 			}
 			if len(matches) > 1 {
 				sort.Strings(matches)
-				return sonos.Member{}, fmt.Errorf("ambiguous speaker name %q; matches: %s", name, strings.Join(matches, ", "))
+				return sonos.Member{}, newTargetAmbiguousError(fmt.Sprintf("ambiguous speaker name %q; matches: %s", name, strings.Join(matches, ", ")), nil, map[string]any{
+					"room":    name,
+					"matches": matches,
+				})
 			}
 		}
-		return sonos.Member{}, errors.New("speaker name not found in topology: " + name)
+		return sonos.Member{}, newTargetNotFoundError("speaker name not found in topology: "+name, nil, map[string]any{
+			"resolution": "topology",
+			"room":       name,
+		})
 	}
 	return mem, nil
 }

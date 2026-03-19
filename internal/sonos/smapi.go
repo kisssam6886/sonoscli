@@ -164,12 +164,22 @@ func (c *SMAPIClient) CompleteAuthentication(ctx context.Context, linkCode, link
 	return pair, nil
 }
 
+type SMAPITrackMetadata struct {
+	Artist      string `json:"artist,omitempty"`
+	Album       string `json:"album,omitempty"`
+	DurationSec int    `json:"durationSec,omitempty"`
+	AlbumArtURI string `json:"albumArtURI,omitempty"`
+	CanPlay     bool   `json:"canPlay,omitempty"`
+	CanSkip     bool   `json:"canSkip,omitempty"`
+}
+
 type SMAPIItem struct {
-	ID       string `json:"id"`
-	ItemType string `json:"itemType"`
-	Title    string `json:"title"`
-	Summary  string `json:"summary,omitempty"`
-	MimeType string `json:"mimeType,omitempty"`
+	ID            string             `json:"id"`
+	ItemType      string             `json:"itemType"`
+	Title         string             `json:"title"`
+	Summary       string             `json:"summary,omitempty"`
+	MimeType      string             `json:"mimeType,omitempty"`
+	TrackMetadata SMAPITrackMetadata `json:"trackMetadata,omitempty"`
 }
 
 type SMAPISearchResult struct {
@@ -210,6 +220,14 @@ func (c *SMAPIClient) Search(ctx context.Context, category, term string, index, 
 		Title    string `xml:"title"`
 		MimeType string `xml:"mimeType"`
 		Summary  string `xml:"summary"`
+		Track    struct {
+			Artist      string `xml:"artist"`
+			Album       string `xml:"album"`
+			Duration    int    `xml:"duration"`
+			AlbumArtURI string `xml:"albumArtURI"`
+			CanPlay     bool   `xml:"canPlay"`
+			CanSkip     bool   `xml:"canSkip"`
+		} `xml:"trackMetadata"`
 	}
 	type mediaCollection struct {
 		ID       string `xml:"id"`
@@ -250,6 +268,14 @@ func (c *SMAPIClient) Search(ctx context.Context, category, term string, index, 
 			Title:    strings.TrimSpace(md.Title),
 			Summary:  strings.TrimSpace(md.Summary),
 			MimeType: strings.TrimSpace(md.MimeType),
+			TrackMetadata: SMAPITrackMetadata{
+				Artist:      strings.TrimSpace(md.Track.Artist),
+				Album:       strings.TrimSpace(md.Track.Album),
+				DurationSec: md.Track.Duration,
+				AlbumArtURI: strings.TrimSpace(md.Track.AlbumArtURI),
+				CanPlay:     md.Track.CanPlay,
+				CanSkip:     md.Track.CanSkip,
+			},
 		})
 	}
 	for _, mc := range out.Result.MC {
@@ -303,6 +329,14 @@ func (c *SMAPIClient) GetMetadata(ctx context.Context, id string, index, count i
 		Title    string `xml:"title"`
 		MimeType string `xml:"mimeType"`
 		Summary  string `xml:"summary"`
+		Track    struct {
+			Artist      string `xml:"artist"`
+			Album       string `xml:"album"`
+			Duration    int    `xml:"duration"`
+			AlbumArtURI string `xml:"albumArtURI"`
+			CanPlay     bool   `xml:"canPlay"`
+			CanSkip     bool   `xml:"canSkip"`
+		} `xml:"trackMetadata"`
 	}
 	type mediaCollection struct {
 		ID       string `xml:"id"`
@@ -342,6 +376,14 @@ func (c *SMAPIClient) GetMetadata(ctx context.Context, id string, index, count i
 			Title:    strings.TrimSpace(md.Title),
 			Summary:  strings.TrimSpace(md.Summary),
 			MimeType: strings.TrimSpace(md.MimeType),
+			TrackMetadata: SMAPITrackMetadata{
+				Artist:      strings.TrimSpace(md.Track.Artist),
+				Album:       strings.TrimSpace(md.Track.Album),
+				DurationSec: md.Track.Duration,
+				AlbumArtURI: strings.TrimSpace(md.Track.AlbumArtURI),
+				CanPlay:     md.Track.CanPlay,
+				CanSkip:     md.Track.CanSkip,
+			},
 		})
 	}
 	for _, mc := range out.Result.MC {

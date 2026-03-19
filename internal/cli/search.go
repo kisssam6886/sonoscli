@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"text/tabwriter"
@@ -29,6 +28,17 @@ var newSpotifySearcher = func(flags *rootFlags, clientID, clientSecret string) (
 
 var newSonosEnqueuer = func(ctx context.Context, flags *rootFlags) (sonosEnqueuer, error) {
 	return coordinatorClient(ctx, flags)
+}
+
+func searchSpotifyOperation(doOpen, doEnqueue bool) string {
+	switch {
+	case doOpen:
+		return "search_open"
+	case doEnqueue:
+		return "search_enqueue"
+	default:
+		return "search"
+	}
 }
 
 func newSearchCmd(flags *rootFlags) *cobra.Command {
@@ -62,10 +72,14 @@ func newSearchSpotifyCmd(flags *rootFlags) *cobra.Command {
 		Args:         cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if doOpen && doEnqueue {
-				return errors.New("use only one of --open or --enqueue")
+				return newInvalidArgumentError("use only one of --open or --enqueue", map[string]any{
+					"action": "spotify.search",
+				})
 			}
 			if (doOpen || doEnqueue) && flags.IP == "" && flags.Name == "" {
-				return errors.New("--open/--enqueue require --ip or --name")
+				return newTargetActionRequiredError("--open/--enqueue require --ip or --name", flags, map[string]any{
+					"action": "spotify.search.open_or_enqueue",
+				})
 			}
 			if index <= 0 {
 				index = 1
@@ -87,12 +101,20 @@ func newSearchSpotifyCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			if len(results) == 0 {
-				return errors.New("no results")
+				return newNoResultsError("no results", map[string]any{
+					"source": "spotify.webapi",
+					"query":  query,
+					"type":   string(st),
+				})
 			}
 
 			if doOpen || doEnqueue {
 				if index > len(results) {
-					return fmt.Errorf("--index %d out of range (got %d results)", index, len(results))
+					return newIndexOutOfRangeError(index, len(results), map[string]any{
+						"source": "spotify.webapi",
+						"query":  query,
+						"type":   string(st),
+					})
 				}
 				selected := results[index-1]
 				ref := selected.URI
@@ -103,7 +125,10 @@ func newSearchSpotifyCmd(flags *rootFlags) *cobra.Command {
 				}
 				_, ok := sonos.ParseSpotifyRef(ref)
 				if !ok {
-					return errors.New("selected result is not a supported Spotify ref: " + ref)
+					return newUnsupportedRefError("selected result is not a supported Spotify ref: "+ref, map[string]any{
+						"source": "spotify.webapi",
+						"ref":    ref,
+					})
 				}
 
 				_, err = c.EnqueueSpotify(cmd.Context(), ref, sonos.EnqueueOptions{
@@ -115,20 +140,40 @@ func newSearchSpotifyCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			if isJSON(flags) {
+				selectionAction := ""
+				if doOpen {
+					selectionAction = "open"
+				} else if doEnqueue {
+					selectionAction = "enqueue"
+				}
+				request := compactMap(map[string]any{
+					"query":           query,
+					"type":            string(st),
+					"limit":           limit,
+					"market":          market,
+					"index":           index,
+					"selectionAction": selectionAction,
+				})
+				result := map[string]any{
+					"resultCount": len(results),
+				}
+				extra := map[string]any{
+					"query":   query,
+					"type":    st,
+					"results": results,
+				}
 				if doOpen || doEnqueue {
 					selected := results[index-1]
-					return writeJSON(cmd, map[string]any{
-						"query":    query,
-						"type":     st,
-						"results":  results,
-						"selected": selected,
-						"action": map[string]any{
-							"enqueue": true,
-							"playNow": doOpen,
-						},
-					})
+					result["selectedURI"] = selected.URI
+					result["selectedTitle"] = selected.Title
+					result["selectedType"] = string(selected.Type)
+					result["selectionAction"] = selectionAction
+					extra["selected"] = selected
+					extra["selectionAction"] = selectionAction
+					extra["enqueue"] = doOpen || doEnqueue
+					extra["playNow"] = doOpen
 				}
-				return writeJSON(cmd, results)
+				return writeExecutionOK(cmd, flags, "search.spotify", newExecutionOutput("music.spotify", searchSpotifyOperation(doOpen, doEnqueue), executionTargetFromFlags(flags), request, compactMap(result)), extra)
 			}
 
 			if isTSV(flags) {

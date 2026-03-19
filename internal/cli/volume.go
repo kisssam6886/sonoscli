@@ -28,7 +28,10 @@ func newVolumeCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			if isJSON(flags) {
-				return writeJSON(cmd, map[string]any{"volume": v, "coordinatorIP": c.IP})
+				return writeExecutionOK(cmd, flags, "volume.get", newExecutionOutput("transport.volume", "get", executionTargetFromFlags(flags), nil, map[string]any{
+					"volume":        v,
+					"coordinatorIP": c.IP,
+				}), map[string]any{"volume": v, "coordinatorIP": c.IP})
 			}
 			if isTSV(flags) {
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "volume\t%d\n", v)
@@ -51,12 +54,20 @@ func newVolumeCmd(flags *rootFlags) *cobra.Command {
 			}
 			v, err := strconv.Atoi(args[0])
 			if err != nil {
-				return err
+				return newInvalidArgumentError("volume must be an integer", map[string]any{
+					"action": "volume.set",
+					"value":  args[0],
+				})
 			}
 			if err := c.SetVolume(ctx, v); err != nil {
 				return err
 			}
-			return writeOK(cmd, flags, "volume.set", map[string]any{"coordinatorIP": c.IP, "volume": v})
+			return writeExecutionOK(cmd, flags, "volume.set", newExecutionOutput("transport.volume", "set", executionTargetFromFlags(flags), map[string]any{
+				"volume": v,
+			}, map[string]any{
+				"volume":        v,
+				"coordinatorIP": c.IP,
+			}), map[string]any{"coordinatorIP": c.IP, "volume": v})
 		},
 	})
 

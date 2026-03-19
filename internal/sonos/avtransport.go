@@ -164,6 +164,32 @@ type PositionInfo struct {
 	RelTime       string
 }
 
+type MediaInfo struct {
+	NrTracks           string
+	MediaDuration      string
+	CurrentURI         string
+	CurrentURIMetaData string
+	NextURI            string
+	NextURIMetaData    string
+}
+
+func (c *Client) GetMediaInfo(ctx context.Context) (MediaInfo, error) {
+	resp, err := c.soapCall(ctx, controlAVTransport, urnAVTransport, "GetMediaInfo", map[string]string{
+		"InstanceID": "0",
+	})
+	if err != nil {
+		return MediaInfo{}, err
+	}
+	return MediaInfo{
+		NrTracks:           resp["NrTracks"],
+		MediaDuration:      resp["MediaDuration"],
+		CurrentURI:         resp["CurrentURI"],
+		CurrentURIMetaData: resp["CurrentURIMetaData"],
+		NextURI:            resp["NextURI"],
+		NextURIMetaData:    resp["NextURIMetaData"],
+	}, nil
+}
+
 func (c *Client) GetPositionInfo(ctx context.Context) (PositionInfo, error) {
 	resp, err := c.soapCall(ctx, controlAVTransport, urnAVTransport, "GetPositionInfo", map[string]string{
 		"InstanceID": "0",
@@ -198,4 +224,41 @@ func (c *Client) GetTransportInfo(ctx context.Context) (TransportInfo, error) {
 		Status: resp["CurrentTransportStatus"],
 		Speed:  resp["CurrentSpeed"],
 	}, nil
+}
+
+// PlayMode represents the playback mode (shuffle/repeat settings).
+type PlayMode string
+
+const (
+	PlayModeNormal          PlayMode = "NORMAL"
+	PlayModeShuffle         PlayMode = "SHUFFLE"
+	PlayModeShuffleNoRepeat PlayMode = "SHUFFLE_NOREPEAT"
+	PlayModeRepeatAll       PlayMode = "REPEAT_ALL"
+	PlayModeRepeatOne       PlayMode = "REPEAT_ONE"
+)
+
+type TransportSettings struct {
+	PlayMode       PlayMode
+	RecQualityMode string
+}
+
+func (c *Client) GetTransportSettings(ctx context.Context) (TransportSettings, error) {
+	resp, err := c.soapCall(ctx, controlAVTransport, urnAVTransport, "GetTransportSettings", map[string]string{
+		"InstanceID": "0",
+	})
+	if err != nil {
+		return TransportSettings{}, err
+	}
+	return TransportSettings{
+		PlayMode:       PlayMode(resp["PlayMode"]),
+		RecQualityMode: resp["RecQualityMode"],
+	}, nil
+}
+
+func (c *Client) SetPlayMode(ctx context.Context, mode PlayMode) error {
+	_, err := c.soapCall(ctx, controlAVTransport, urnAVTransport, "SetPlayMode", map[string]string{
+		"InstanceID":  "0",
+		"NewPlayMode": string(mode),
+	})
+	return err
 }

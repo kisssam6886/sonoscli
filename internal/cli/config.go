@@ -12,6 +12,13 @@ import (
 
 var newConfigStore = func() (appconfig.Store, error) { return appconfig.NewDefaultStore() }
 
+func configExecutionResult(cfg appconfig.Config) map[string]any {
+	return compactMap(map[string]any{
+		"defaultRoom": strings.TrimSpace(cfg.DefaultRoom),
+		"format":      strings.TrimSpace(cfg.Format),
+	})
+}
+
 func newConfigCmd(flags *rootFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
@@ -35,7 +42,9 @@ func newConfigPathCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			if isJSON(flags) {
-				return writeJSON(cmd, map[string]any{"path": s.Path()})
+				return writeExecutionOK(cmd, flags, "config.path", newExecutionOutput("config", "path", nil, nil, map[string]any{
+					"path": s.Path(),
+				}), map[string]any{"path": s.Path()})
 			}
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(), s.Path())
 			return nil
@@ -60,7 +69,10 @@ func newConfigGetCmd(flags *rootFlags) *cobra.Command {
 
 			if len(args) == 0 {
 				if isJSON(flags) {
-					return writeJSON(cmd, cfg)
+					return writeExecutionOK(cmd, flags, "config.get", newExecutionOutput("config", "get", nil, nil, configExecutionResult(cfg)), map[string]any{
+						"defaultRoom": cfg.DefaultRoom,
+						"format":      cfg.Format,
+					})
 				}
 				printConfigPlain(cmd, cfg)
 				return nil
@@ -72,7 +84,12 @@ func newConfigGetCmd(flags *rootFlags) *cobra.Command {
 				return errors.New("unknown key: " + key)
 			}
 			if isJSON(flags) {
-				return writeJSON(cmd, map[string]any{key: val})
+				return writeExecutionOK(cmd, flags, "config.get", newExecutionOutput("config", "get", nil, map[string]any{
+					"key": key,
+				}, map[string]any{
+					"key":   key,
+					"value": val,
+				}), map[string]any{key: val})
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s=%s\n", key, val)
 			return nil
@@ -104,7 +121,13 @@ func newConfigSetCmd(flags *rootFlags) *cobra.Command {
 			if err := s.Save(cfg); err != nil {
 				return err
 			}
-			return writeOK(cmd, flags, "config.set", map[string]any{"key": key, "value": value})
+			return writeExecutionOK(cmd, flags, "config.set", newExecutionOutput("config", "set", nil, map[string]any{
+				"key":   key,
+				"value": value,
+			}, map[string]any{
+				"key":   key,
+				"value": value,
+			}), map[string]any{"key": key, "value": value})
 		},
 	}
 }
@@ -132,7 +155,11 @@ func newConfigUnsetCmd(flags *rootFlags) *cobra.Command {
 			if err := s.Save(cfg); err != nil {
 				return err
 			}
-			return writeOK(cmd, flags, "config.unset", map[string]any{"key": key})
+			return writeExecutionOK(cmd, flags, "config.unset", newExecutionOutput("config", "unset", nil, map[string]any{
+				"key": key,
+			}, map[string]any{
+				"key": key,
+			}), map[string]any{"key": key})
 		},
 	}
 }

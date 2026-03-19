@@ -37,6 +37,7 @@ type executeActionAlias struct {
 
 var executeActionAliases = map[string]executeActionAlias{
 	"doctor":                {Capability: "doctor", Operation: "report"},
+	"doctor.room":           {Capability: "doctor", Operation: "room"},
 	"discover":              {Capability: "discover", Operation: "scan"},
 	"status":                {Capability: "transport.status", Operation: "get"},
 	"play":                  {Capability: "transport", Operation: "play"},
@@ -314,10 +315,14 @@ func firstNonEmpty(values ...string) string {
 func buildExecuteCommand(flags *rootFlags, req executeRequestPayload) (*cobra.Command, []string, error) {
 	switch req.Capability {
 	case "doctor":
-		if req.Operation != "report" {
-			return nil, nil, unsupportedExecuteOperation(req, "report")
+		switch req.Operation {
+		case "report":
+			return newDoctorCmd(flags), nil, nil
+		case "room":
+			return newDoctorRoomCmd(flags), nil, nil
+		default:
+			return nil, nil, unsupportedExecuteOperation(req, "report", "room")
 		}
-		return newDoctorCmd(flags), nil, nil
 	case "discover":
 		if req.Operation != "scan" {
 			return nil, nil, unsupportedExecuteOperation(req, "scan")

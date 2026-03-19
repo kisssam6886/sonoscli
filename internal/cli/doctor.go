@@ -87,7 +87,7 @@ var (
 )
 
 func newDoctorCmd(flags *rootFlags) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:          "doctor",
 		Short:        "Self-check the current CLI binary, path resolution, and build info",
 		SilenceUsage: true,
@@ -103,6 +103,8 @@ func newDoctorCmd(flags *rootFlags) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.AddCommand(newDoctorRoomCmd(flags))
+	return cmd
 }
 
 func buildDoctorReport() (doctorReport, error) {

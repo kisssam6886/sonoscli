@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"net/url"
 	"strings"
@@ -62,11 +63,24 @@ func newNCMPlayCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			items := onlyNCMTracks(append(toLikeItemsFromMetadata(res.MediaMetadata), toLikeItemsFromCollections(res.MediaCollection)...))
+			blockedFiltered := 0
+			_, playability, playabilityErr := loadPlayabilityFile()
+			if playabilityErr != nil {
+				slog.Warn("playability store unavailable", "error", playabilityErr)
+			} else {
+				items, blockedFiltered = filterBlockedLikeItems(playability, svc.ID, svc.Name, items)
+			}
+			items = preferNonLiveLikeItems(items)
 			if len(items) == 0 {
-				return newNoResultsError("no playable tracks", map[string]any{
-					"source":   "netease.ncm",
-					"query":    query,
-					"category": category,
+				message := "no playable tracks"
+				if blockedFiltered > 0 {
+					message = "no playable tracks after blocked items filtered"
+				}
+				return newNoResultsError(message, map[string]any{
+					"source":          "netease.ncm",
+					"query":           query,
+					"category":        category,
+					"blockedFiltered": blockedFiltered,
 				})
 			}
 			if index > len(items) {
@@ -92,6 +106,7 @@ func newNCMPlayCmd(flags *rootFlags) *cobra.Command {
 			}
 			playback, err := executeNCMQueueRebuild(ctx, qc, queuedItems, playIndex)
 			if err != nil {
+				rememberBlockedLikeItem(svc.ID, svc.Name, selected, err)
 				return err
 			}
 			playURI := buildNCMTrackURI(selected.ID)
@@ -104,21 +119,23 @@ func newNCMPlayCmd(flags *rootFlags) *cobra.Command {
 					"limit":    limit,
 					"index":    index,
 				}, map[string]any{
-					"selectedID":     selected.ID,
-					"selectedTitle":  selected.Title,
-					"playableHits":   len(items),
-					"queuedTracks":   playback.EnqueuedCount,
-					"playedPosition": playback.PlayedPosition,
+					"selectedID":      selected.ID,
+					"selectedTitle":   selected.Title,
+					"playableHits":    len(items),
+					"queuedTracks":    playback.EnqueuedCount,
+					"playedPosition":  playback.PlayedPosition,
+					"blockedFiltered": blockedFiltered,
 				}), map[string]any{
-					"service":      svc.Name,
-					"speakerIP":    speaker.IP,
-					"category":     category,
-					"query":        query,
-					"selected":     selected,
-					"uri":          playURI,
-					"playableHits": len(items),
-					"queuedTracks": playback.EnqueuedCount,
-					"playback":     playback,
+					"service":         svc.Name,
+					"speakerIP":       speaker.IP,
+					"category":        category,
+					"query":           query,
+					"selected":        selected,
+					"uri":             playURI,
+					"playableHits":    len(items),
+					"queuedTracks":    playback.EnqueuedCount,
+					"blockedFiltered": blockedFiltered,
+					"playback":        playback,
 				})
 			}
 			writePlainLine(cmd, flags, fmt.Sprintf("已播放：%s", selected.Title))
@@ -161,11 +178,24 @@ func newNCMLuckyCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			items := onlyNCMTracks(toLikeItemsFromMetadata(res.MediaMetadata))
+			blockedFiltered := 0
+			_, playability, playabilityErr := loadPlayabilityFile()
+			if playabilityErr != nil {
+				slog.Warn("playability store unavailable", "error", playabilityErr)
+			} else {
+				items, blockedFiltered = filterBlockedLikeItems(playability, svc.ID, svc.Name, items)
+			}
+			items = onlyPreferNonLiveLikeItems(preferNonLiveLikeItems(items))
 			if len(items) == 0 {
-				return newNoResultsError("no playable tracks", map[string]any{
-					"source":   "netease.ncm",
-					"query":    query,
-					"category": "tracks",
+				message := "no playable tracks"
+				if blockedFiltered > 0 {
+					message = "no playable tracks after blocked items filtered"
+				}
+				return newNoResultsError(message, map[string]any{
+					"source":          "netease.ncm",
+					"query":           query,
+					"category":        "tracks",
+					"blockedFiltered": blockedFiltered,
 				})
 			}
 			selectedIndex := rand.Intn(len(items))
@@ -185,6 +215,7 @@ func newNCMLuckyCmd(flags *rootFlags) *cobra.Command {
 			}
 			playback, err := executeNCMQueueRebuild(ctx, c, queuedItems, playIndex)
 			if err != nil {
+				rememberBlockedLikeItem(svc.ID, svc.Name, selected, err)
 				return err
 			}
 			playURI := buildNCMTrackURI(selected.ID)
@@ -195,21 +226,23 @@ func newNCMLuckyCmd(flags *rootFlags) *cobra.Command {
 					"query": query,
 					"limit": limit,
 				}, map[string]any{
-					"selectedID":     selected.ID,
-					"selectedTitle":  selected.Title,
-					"selectedIndex":  selectedIndex,
-					"playableHits":   len(items),
-					"queuedTracks":   playback.EnqueuedCount,
-					"playedPosition": playback.PlayedPosition,
+					"selectedID":      selected.ID,
+					"selectedTitle":   selected.Title,
+					"selectedIndex":   selectedIndex,
+					"playableHits":    len(items),
+					"queuedTracks":    playback.EnqueuedCount,
+					"playedPosition":  playback.PlayedPosition,
+					"blockedFiltered": blockedFiltered,
 				}), map[string]any{
-					"service":      svc.Name,
-					"speakerIP":    speaker.IP,
-					"query":        query,
-					"selected":     selected,
-					"uri":          playURI,
-					"playableHits": len(items),
-					"queuedTracks": playback.EnqueuedCount,
-					"playback":     playback,
+					"service":         svc.Name,
+					"speakerIP":       speaker.IP,
+					"query":           query,
+					"selected":        selected,
+					"uri":             playURI,
+					"playableHits":    len(items),
+					"queuedTracks":    playback.EnqueuedCount,
+					"blockedFiltered": blockedFiltered,
+					"playback":        playback,
 				})
 			}
 			writePlainLine(cmd, flags, fmt.Sprintf("已随机播放：%s", selected.Title))

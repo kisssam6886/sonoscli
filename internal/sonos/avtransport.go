@@ -164,6 +164,32 @@ type PositionInfo struct {
 	RelTime       string
 }
 
+type MediaInfo struct {
+	NrTracks           string
+	MediaDuration      string
+	CurrentURI         string
+	CurrentURIMetaData string
+	NextURI            string
+	NextURIMetaData    string
+}
+
+func (c *Client) GetMediaInfo(ctx context.Context) (MediaInfo, error) {
+	resp, err := c.soapCall(ctx, controlAVTransport, urnAVTransport, "GetMediaInfo", map[string]string{
+		"InstanceID": "0",
+	})
+	if err != nil {
+		return MediaInfo{}, err
+	}
+	return MediaInfo{
+		NrTracks:           resp["NrTracks"],
+		MediaDuration:      resp["MediaDuration"],
+		CurrentURI:         resp["CurrentURI"],
+		CurrentURIMetaData: resp["CurrentURIMetaData"],
+		NextURI:            resp["NextURI"],
+		NextURIMetaData:    resp["NextURIMetaData"],
+	}, nil
+}
+
 func (c *Client) GetPositionInfo(ctx context.Context) (PositionInfo, error) {
 	resp, err := c.soapCall(ctx, controlAVTransport, urnAVTransport, "GetPositionInfo", map[string]string{
 		"InstanceID": "0",

@@ -149,20 +149,21 @@ func TestNCMPlaySkipsBlockedTracks(t *testing.T) {
 	}
 }
 
-func TestPreferNonLiveLikeItems_PutsLiveAfterStudio(t *testing.T) {
+func TestRankLikeItemsForQuery_PrefersArtistThenNonLive(t *testing.T) {
 	t.Parallel()
 
 	items := []smapiLikeItem{
-		{ID: "SONG:1", Title: "男人哭吧不是罪(Live)", Album: "幻影中国巡回演唱会Live"},
-		{ID: "SONG:2", Title: "男人哭吧不是罪", Album: "经典精选"},
-		{ID: "SONG:3", Title: "心照", Album: "Friends For Life (新曲+精选)"},
+		{ID: "SONG:0", Title: "男人哭吧不是罪", Artist: "陆陟臣", Album: "60s.翻唱"},
+		{ID: "SONG:1", Title: "男人哭吧不是罪(Live)", Artist: "刘德华", Album: "幻影中国巡回演唱会Live"},
+		{ID: "SONG:2", Title: "男人哭吧不是罪", Artist: "刘德华", Album: "经典精选"},
+		{ID: "SONG:3", Title: "心照", Artist: "郑伊健", Album: "Friends For Life (新曲+精选)"},
 	}
 
-	got := preferNonLiveLikeItems(items)
-	if len(got) != 3 {
-		t.Fatalf("len = %d, want 3", len(got))
+	got := rankLikeItemsForQuery("刘德华 男人哭吧不是罪", items)
+	if len(got) != 4 {
+		t.Fatalf("len = %d, want 4", len(got))
 	}
-	if got[0].ID != "SONG:2" || got[1].ID != "SONG:3" || got[2].ID != "SONG:1" {
+	if got[0].ID != "SONG:2" || got[1].ID != "SONG:1" || got[2].ID != "SONG:0" || got[3].ID != "SONG:3" {
 		t.Fatalf("unexpected order: %#v", got)
 	}
 }

@@ -550,7 +550,7 @@ func newSMAPISearchCmd(flags *rootFlags) *cobra.Command {
 				if playabilityErr != nil {
 					slog.Warn("playability store unavailable", "error", playabilityErr)
 				} else {
-					filteredRes, blockedFiltered = filterBlockedSearchResult(playability, svc, res)
+					filteredRes, blockedFiltered = filterBlockedSearchResult(playability, svc, query, res)
 				}
 			}
 			flat := append([]sonos.SMAPIItem{}, filteredRes.MediaMetadata...)

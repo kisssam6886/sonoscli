@@ -70,7 +70,7 @@ func newNCMPlayCmd(flags *rootFlags) *cobra.Command {
 			} else {
 				items, blockedFiltered = filterBlockedLikeItems(playability, svc.ID, svc.Name, items)
 			}
-			items = preferNonLiveLikeItems(items)
+			items = rankLikeItemsForQuery(query, items)
 			if len(items) == 0 {
 				message := "no playable tracks"
 				if blockedFiltered > 0 {
@@ -185,7 +185,7 @@ func newNCMLuckyCmd(flags *rootFlags) *cobra.Command {
 			} else {
 				items, blockedFiltered = filterBlockedLikeItems(playability, svc.ID, svc.Name, items)
 			}
-			items = onlyPreferNonLiveLikeItems(preferNonLiveLikeItems(items))
+			items = onlyPreferTopRankedNonLiveLikeItems(query, rankLikeItemsForQuery(query, items))
 			if len(items) == 0 {
 				message := "no playable tracks"
 				if blockedFiltered > 0 {

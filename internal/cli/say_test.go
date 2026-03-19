@@ -11,6 +11,28 @@ import (
 	"github.com/steipete/sonoscli/internal/sonos"
 )
 
+func saySnapshotNoopResponse(action string) (*http.Response, bool) {
+	switch {
+	case strings.Contains(action, "AVTransport:1#GetMediaInfo"):
+		return httpResponseWithStatus(
+			200,
+			soapActionResponse("urn:schemas-upnp-org:service:AVTransport:1", "GetMediaInfo", `<NrTracks>0</NrTracks><MediaDuration></MediaDuration><CurrentURI></CurrentURI><CurrentURIMetaData></CurrentURIMetaData><NextURI></NextURI><NextURIMetaData></NextURIMetaData>`),
+		), true
+	case strings.Contains(action, "AVTransport:1#GetPositionInfo"):
+		return httpResponseWithStatus(
+			200,
+			soapActionResponse("urn:schemas-upnp-org:service:AVTransport:1", "GetPositionInfo", `<Track>0</Track><TrackURI></TrackURI><TrackMetaData></TrackMetaData><TrackDuration></TrackDuration><RelTime></RelTime>`),
+		), true
+	case strings.Contains(action, "AVTransport:1#GetTransportInfo"):
+		return httpResponseWithStatus(
+			200,
+			soapActionResponse("urn:schemas-upnp-org:service:AVTransport:1", "GetTransportInfo", `<CurrentTransportState>STOPPED</CurrentTransportState><CurrentTransportStatus>OK</CurrentTransportStatus><CurrentSpeed>1</CurrentSpeed>`),
+		), true
+	default:
+		return nil, false
+	}
+}
+
 func TestSayCmd_AudioURIJSONIncludesExecutionEnvelopeAndRestoresVolume(t *testing.T) {
 	flags := &rootFlags{IP: "192.0.2.40", Timeout: 2 * time.Second, Format: formatJSON}
 	cmd := newSayCmd(flags)
@@ -73,6 +95,9 @@ func TestSayCmd_AudioURIJSONIncludesExecutionEnvelopeAndRestoresVolume(t *testin
 				soapActionResponse("urn:schemas-upnp-org:service:AVTransport:1", "Play", ``),
 			), nil
 		default:
+			if resp, ok := saySnapshotNoopResponse(action); ok {
+				return resp, nil
+			}
 			t.Fatalf("unexpected action: %q", action)
 			return nil, nil
 		}
@@ -147,6 +172,9 @@ func TestExecuteCmd_SayAnnounceWithAudioURI(t *testing.T) {
 				soapActionResponse("urn:schemas-upnp-org:service:AVTransport:1", "Play", ``),
 			), nil
 		default:
+			if resp, ok := saySnapshotNoopResponse(action); ok {
+				return resp, nil
+			}
 			t.Fatalf("unexpected action: %q", action)
 			return nil, nil
 		}
@@ -232,6 +260,9 @@ func TestSayCmd_AudioURICanForceRadioMode(t *testing.T) {
 				soapActionResponse("urn:schemas-upnp-org:service:AVTransport:1", "Play", ``),
 			), nil
 		default:
+			if resp, ok := saySnapshotNoopResponse(action); ok {
+				return resp, nil
+			}
 			t.Fatalf("unexpected action: %q", action)
 			return nil, nil
 		}
@@ -314,6 +345,9 @@ func TestSayCmd_RespectsContextCancelDuringHold(t *testing.T) {
 				soapActionResponse("urn:schemas-upnp-org:service:AVTransport:1", "Play", ``),
 			), nil
 		default:
+			if resp, ok := saySnapshotNoopResponse(action); ok {
+				return resp, nil
+			}
 			t.Fatalf("unexpected action: %q", action)
 			return nil, nil
 		}
@@ -342,5 +376,120 @@ func TestSayCmd_RespectsContextCancelDuringHold(t *testing.T) {
 	cmd.SilenceUsage = true
 	if err := cmd.ExecuteContext(ctx); err != nil {
 		t.Fatalf("say with cancelled hold: %v", err)
+	}
+}
+
+func TestSayCmd_RestoresQueuePlaybackAfterAnnouncement(t *testing.T) {
+	flags := &rootFlags{IP: "192.0.2.44", Timeout: 2 * time.Second, Format: formatJSON}
+	cmd := newSayCmd(flags)
+
+	var (
+		playCalls      int
+		transportCalls int
+		setURIs        []string
+		seekCalls      []string
+	)
+
+	rt := roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		action := r.Header.Get("SOAPACTION")
+		switch {
+		case strings.Contains(action, "ZoneGroupTopology:1#GetZoneGroupState"):
+			return httpResponseWithStatus(500, ""), nil
+		case strings.Contains(action, "AVTransport:1#GetMediaInfo"):
+			return httpResponseWithStatus(
+				200,
+				soapActionResponse("urn:schemas-upnp-org:service:AVTransport:1", "GetMediaInfo", `<NrTracks>4</NrTracks><MediaDuration></MediaDuration><CurrentURI>x-rincon-queue:RINCON_ABC1400#0</CurrentURI><CurrentURIMetaData>&lt;DIDL-Lite/&gt;</CurrentURIMetaData><NextURI></NextURI><NextURIMetaData></NextURIMetaData>`),
+			), nil
+		case strings.Contains(action, "AVTransport:1#GetPositionInfo"):
+			return httpResponseWithStatus(
+				200,
+				soapActionResponse("urn:schemas-upnp-org:service:AVTransport:1", "GetPositionInfo", `<Track>4</Track><TrackURI>x-sonos-http:SONG%3ATEST.mp3</TrackURI><TrackMetaData></TrackMetaData><TrackDuration>0:03:17</TrackDuration><RelTime>0:00:39</RelTime>`),
+			), nil
+		case strings.Contains(action, "AVTransport:1#GetTransportInfo"):
+			transportCalls++
+			state := "PLAYING"
+			if transportCalls > 1 {
+				state = "PLAYING"
+			}
+			return httpResponseWithStatus(
+				200,
+				soapActionResponse("urn:schemas-upnp-org:service:AVTransport:1", "GetTransportInfo", `<CurrentTransportState>`+state+`</CurrentTransportState><CurrentTransportStatus>OK</CurrentTransportStatus><CurrentSpeed>1</CurrentSpeed>`),
+			), nil
+		case strings.Contains(action, "AVTransport:1#SetAVTransportURI"):
+			body, _ := io.ReadAll(r.Body)
+			_ = r.Body.Close()
+			bodyStr := string(body)
+			if start := strings.Index(bodyStr, "<CurrentURI>"); start >= 0 {
+				start += len("<CurrentURI>")
+				if end := strings.Index(bodyStr, "</CurrentURI>"); end > start {
+					setURIs = append(setURIs, bodyStr[start:end])
+				}
+			}
+			return httpResponseWithStatus(
+				200,
+				soapActionResponse("urn:schemas-upnp-org:service:AVTransport:1", "SetAVTransportURI", ``),
+			), nil
+		case strings.Contains(action, "AVTransport:1#Seek"):
+			body, _ := io.ReadAll(r.Body)
+			_ = r.Body.Close()
+			bodyStr := string(body)
+			unit := ""
+			target := ""
+			if start := strings.Index(bodyStr, "<Unit>"); start >= 0 {
+				start += len("<Unit>")
+				if end := strings.Index(bodyStr, "</Unit>"); end > start {
+					unit = bodyStr[start:end]
+				}
+			}
+			if start := strings.Index(bodyStr, "<Target>"); start >= 0 {
+				start += len("<Target>")
+				if end := strings.Index(bodyStr, "</Target>"); end > start {
+					target = bodyStr[start:end]
+				}
+			}
+			seekCalls = append(seekCalls, unit+":"+target)
+			return httpResponseWithStatus(
+				200,
+				soapActionResponse("urn:schemas-upnp-org:service:AVTransport:1", "Seek", ``),
+			), nil
+		case strings.Contains(action, "AVTransport:1#Play"):
+			playCalls++
+			return httpResponseWithStatus(
+				200,
+				soapActionResponse("urn:schemas-upnp-org:service:AVTransport:1", "Play", ``),
+			), nil
+		default:
+			t.Fatalf("unexpected action: %q", action)
+			return nil, nil
+		}
+	})
+
+	oldNew := newSonosClient
+	t.Cleanup(func() { newSonosClient = oldNew })
+	newSonosClient = func(ip string, timeout time.Duration) *sonos.Client {
+		return &sonos.Client{
+			IP:   ip,
+			Port: 1400,
+			HTTP: &http.Client{Timeout: timeout, Transport: rt},
+		}
+	}
+
+	if _, err := execute(t, cmd, "--audio-uri", "http://example.com/tts.aiff", "--hold-seconds", "1", "恢复测试"); err != nil {
+		t.Fatalf("say restore queue: %v", err)
+	}
+	if playCalls != 2 {
+		t.Fatalf("expected Play twice (announce + restore), got %d", playCalls)
+	}
+	if len(setURIs) != 2 {
+		t.Fatalf("expected 2 SetAVTransportURI calls, got %#v", setURIs)
+	}
+	if setURIs[0] != "http://example.com/tts.aiff" {
+		t.Fatalf("unexpected announcement URI: %q", setURIs[0])
+	}
+	if setURIs[1] != "x-rincon-queue:RINCON_ABC1400#0" {
+		t.Fatalf("unexpected restored URI: %q", setURIs[1])
+	}
+	if len(seekCalls) != 2 || seekCalls[0] != "TRACK_NR:4" || seekCalls[1] != "REL_TIME:0:00:39" {
+		t.Fatalf("unexpected seek calls: %#v", seekCalls)
 	}
 }

@@ -227,14 +227,14 @@ func loadPlayabilityFile() (playabilityStore, playabilityFile, error) {
 	return store, f, nil
 }
 
-func filterBlockedSearchResult(reg playabilityFile, svc sonos.MusicServiceDescriptor, res sonos.SMAPISearchResult) (sonos.SMAPISearchResult, int) {
+func filterBlockedSearchResult(reg playabilityFile, svc sonos.MusicServiceDescriptor, query string, res sonos.SMAPISearchResult) (sonos.SMAPISearchResult, int) {
 	filtered := res
 	blocked := 0
 	filtered.MediaMetadata, blocked = filterBlockedSMAPIItems(reg, svc, res.MediaMetadata)
 	filteredCollections, blockedCollections := filterBlockedSMAPIItems(reg, svc, res.MediaCollection)
 	filtered.MediaCollection = filteredCollections
 	blocked += blockedCollections
-	filtered = preferNonLiveSearchResult(filtered)
+	filtered = rankSearchResultForQuery(query, filtered)
 	filtered.Count = len(filtered.MediaMetadata) + len(filtered.MediaCollection)
 	return filtered, blocked
 }
@@ -273,39 +273,90 @@ func filterBlockedLikeItems(reg playabilityFile, serviceID, serviceName string, 
 	return out, blocked
 }
 
-func preferNonLiveSearchResult(res sonos.SMAPISearchResult) sonos.SMAPISearchResult {
-	res.MediaMetadata = preferNonLiveSMAPIItems(res.MediaMetadata)
-	res.MediaCollection = preferNonLiveSMAPIItems(res.MediaCollection)
+func rankSearchResultForQuery(query string, res sonos.SMAPISearchResult) sonos.SMAPISearchResult {
+	res.MediaMetadata = rankSMAPIItemsForQuery(query, res.MediaMetadata)
+	res.MediaCollection = rankSMAPIItemsForQuery(query, res.MediaCollection)
 	return res
 }
 
-func preferNonLiveSMAPIItems(items []sonos.SMAPIItem) []sonos.SMAPIItem {
+func rankSMAPIItemsForQuery(query string, items []sonos.SMAPIItem) []sonos.SMAPIItem {
 	if len(items) < 2 {
 		return items
 	}
 	out := append([]sonos.SMAPIItem(nil), items...)
 	sort.SliceStable(out, func(i, j int) bool {
+		leftArtist := artistMatchScoreForQuery(query, out[i].TrackMetadata.Artist)
+		rightArtist := artistMatchScoreForQuery(query, out[j].TrackMetadata.Artist)
+		if leftArtist != rightArtist {
+			return leftArtist > rightArtist
+		}
+		leftTitle := titleMatchScoreForQuery(query, out[i].Title)
+		rightTitle := titleMatchScoreForQuery(query, out[j].Title)
+		if leftTitle != rightTitle {
+			return leftTitle > rightTitle
+		}
+		leftVersion := adaptationPenaltyForParts(out[i].Title, out[i].Summary, out[i].TrackMetadata.Artist, out[i].TrackMetadata.Album)
+		rightVersion := adaptationPenaltyForParts(out[j].Title, out[j].Summary, out[j].TrackMetadata.Artist, out[j].TrackMetadata.Album)
+		if leftVersion != rightVersion {
+			return leftVersion < rightVersion
+		}
 		return livePenaltyForSMAPIItem(out[i]) < livePenaltyForSMAPIItem(out[j])
 	})
 	return out
 }
 
-func preferNonLiveLikeItems(items []smapiLikeItem) []smapiLikeItem {
+func rankLikeItemsForQuery(query string, items []smapiLikeItem) []smapiLikeItem {
 	if len(items) < 2 {
 		return items
 	}
 	out := append([]smapiLikeItem(nil), items...)
 	sort.SliceStable(out, func(i, j int) bool {
+		leftArtist := artistMatchScoreForQuery(query, out[i].Artist)
+		rightArtist := artistMatchScoreForQuery(query, out[j].Artist)
+		if leftArtist != rightArtist {
+			return leftArtist > rightArtist
+		}
+		leftTitle := titleMatchScoreForQuery(query, out[i].Title)
+		rightTitle := titleMatchScoreForQuery(query, out[j].Title)
+		if leftTitle != rightTitle {
+			return leftTitle > rightTitle
+		}
+		leftVersion := adaptationPenaltyForParts(out[i].Title, out[i].Summary, out[i].Artist, out[i].Album)
+		rightVersion := adaptationPenaltyForParts(out[j].Title, out[j].Summary, out[j].Artist, out[j].Album)
+		if leftVersion != rightVersion {
+			return leftVersion < rightVersion
+		}
 		return livePenaltyForLikeItem(out[i]) < livePenaltyForLikeItem(out[j])
 	})
 	return out
 }
 
-func onlyPreferNonLiveLikeItems(items []smapiLikeItem) []smapiLikeItem {
+func onlyPreferTopRankedNonLiveLikeItems(query string, items []smapiLikeItem) []smapiLikeItem {
 	if len(items) == 0 {
 		return nil
 	}
 	nonLive := make([]smapiLikeItem, 0, len(items))
+	for _, item := range items {
+		if artistMatchScoreForQuery(query, item.Artist) <= 0 || titleMatchScoreForQuery(query, item.Title) <= 0 {
+			continue
+		}
+		if livePenaltyForLikeItem(item) == 0 {
+			nonLive = append(nonLive, item)
+		}
+	}
+	if len(nonLive) > 0 {
+		return nonLive
+	}
+	artistMatched := make([]smapiLikeItem, 0, len(items))
+	for _, item := range items {
+		if artistMatchScoreForQuery(query, item.Artist) > 0 && titleMatchScoreForQuery(query, item.Title) > 0 {
+			artistMatched = append(artistMatched, item)
+		}
+	}
+	if len(artistMatched) > 0 {
+		return artistMatched
+	}
+	nonLive = nonLive[:0]
 	for _, item := range items {
 		if livePenaltyForLikeItem(item) == 0 {
 			nonLive = append(nonLive, item)
@@ -353,6 +404,94 @@ func isLikelyLiveVersion(parts ...string) bool {
 		}
 	}
 	return false
+}
+
+func adaptationPenaltyForParts(parts ...string) int {
+	text := strings.ToLower(strings.Join(parts, " "))
+	if text == "" {
+		return 0
+	}
+	indicators := []string{
+		"翻唱",
+		"翻自",
+		"cover",
+		"remix",
+		"dj",
+	}
+	for _, indicator := range indicators {
+		if strings.Contains(text, indicator) {
+			return 1
+		}
+	}
+	return 0
+}
+
+func artistMatchScoreForQuery(query, artist string) int {
+	artist = strings.ToLower(strings.TrimSpace(artist))
+	if artist == "" {
+		return 0
+	}
+	hint := primaryArtistHint(query)
+	if hint == "" {
+		return 0
+	}
+	if artist == hint {
+		return 2
+	}
+	if strings.Contains(artist, hint) || strings.Contains(hint, artist) {
+		return 1
+	}
+	return 0
+}
+
+func titleMatchScoreForQuery(query, title string) int {
+	title = normalizedQueryCompareText(title)
+	if title == "" {
+		return 0
+	}
+	hint := normalizedQueryCompareText(primaryTitleHint(query))
+	if hint == "" {
+		return 0
+	}
+	if title == hint {
+		return 2
+	}
+	if strings.Contains(title, hint) {
+		return 1
+	}
+	return 0
+}
+
+func primaryArtistHint(query string) string {
+	parts := strings.Fields(strings.TrimSpace(query))
+	if len(parts) < 2 {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(parts[0]))
+}
+
+func primaryTitleHint(query string) string {
+	parts := strings.Fields(strings.TrimSpace(query))
+	if len(parts) < 2 {
+		return ""
+	}
+	return strings.Join(parts[1:], " ")
+}
+
+func normalizedQueryCompareText(text string) string {
+	text = strings.ToLower(strings.TrimSpace(text))
+	replacer := strings.NewReplacer(
+		" ", "",
+		"（", "",
+		"）", "",
+		"(", "",
+		")", "",
+		"《", "",
+		"》", "",
+		"-", "",
+		"_", "",
+	)
+	return replacer.Replace(text)
 }
 
 func rememberBlockedSMAPIItem(svc sonos.MusicServiceDescriptor, item sonos.SMAPIItem, err error) {

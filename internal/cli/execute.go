@@ -38,6 +38,7 @@ type executeActionAlias struct {
 var executeActionAliases = map[string]executeActionAlias{
 	"doctor":                {Capability: "doctor", Operation: "report"},
 	"doctor.room":           {Capability: "doctor", Operation: "room"},
+	"doctor.ncm":            {Capability: "doctor", Operation: "ncm"},
 	"discover":              {Capability: "discover", Operation: "scan"},
 	"status":                {Capability: "transport.status", Operation: "get"},
 	"play":                  {Capability: "transport", Operation: "play"},
@@ -320,8 +321,32 @@ func buildExecuteCommand(flags *rootFlags, req executeRequestPayload) (*cobra.Co
 			return newDoctorCmd(flags), nil, nil
 		case "room":
 			return newDoctorRoomCmd(flags), nil, nil
+		case "ncm":
+			args := []string{}
+			query, _, err := executeStringField(req.Request, "query")
+			if err != nil {
+				return nil, nil, err
+			}
+			if strings.TrimSpace(query) != "" {
+				args = append(args, "--query", query)
+			}
+			category, _, err := executeStringField(req.Request, "category")
+			if err != nil {
+				return nil, nil, err
+			}
+			if strings.TrimSpace(category) != "" {
+				args = append(args, "--category", category)
+			}
+			limit, ok, err := executeIntField(req.Request, "limit")
+			if err != nil {
+				return nil, nil, err
+			}
+			if ok {
+				args = append(args, "--limit", strconv.Itoa(limit))
+			}
+			return newDoctorNCMCmd(flags), args, nil
 		default:
-			return nil, nil, unsupportedExecuteOperation(req, "report", "room")
+			return nil, nil, unsupportedExecuteOperation(req, "report", "room", "ncm")
 		}
 	case "discover":
 		if req.Operation != "scan" {

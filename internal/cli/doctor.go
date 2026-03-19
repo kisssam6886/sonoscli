@@ -104,6 +104,7 @@ func newDoctorCmd(flags *rootFlags) *cobra.Command {
 		},
 	}
 	cmd.AddCommand(newDoctorRoomCmd(flags))
+	cmd.AddCommand(newDoctorNCMCmd(flags))
 	return cmd
 }
 

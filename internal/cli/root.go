@@ -2,7 +2,7 @@ package cli
 
 import (
 	"context"
-	"errors"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -22,15 +22,28 @@ type rootFlags struct {
 }
 
 func Execute() error {
-	rootCmd, _, err := newRootCmd()
+	rootCmd, flags, err := newRootCmd()
 	if err != nil {
 		return err
 	}
-	ctx := context.Background()
+	return ExecuteArgs(rootCmd, flags, os.Args[1:])
+}
+
+func ExecuteArgs(rootCmd *cobra.Command, flags *rootFlags, args []string) error {
+	if flags == nil {
+		flags = &rootFlags{}
+	}
+	ctx := rootCmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	rootCmd.SetContext(ctx)
+	rootCmd.SetArgs(args)
+	rootCmd.SilenceErrors = true
+	rootCmd.SilenceUsage = true
 
 	if err := rootCmd.Execute(); err != nil {
-		return err
+		return handleCLIExecuteError(rootCmd, flags, args, err)
 	}
 	return nil
 }
@@ -83,6 +96,7 @@ func newRootCmd() (*cobra.Command, *rootFlags, error) {
 			return err
 		}
 		flags.Format = norm
+		maybeWarnBinaryMismatch(cmd, flags)
 		return nil
 	}
 
@@ -99,6 +113,8 @@ func newRootCmd() (*cobra.Command, *rootFlags, error) {
 	}
 
 	rootCmd.AddCommand(newDiscoverCmd(flags))
+	rootCmd.AddCommand(newDoctorCmd(flags))
+	rootCmd.AddCommand(newExecuteCmd(flags))
 	rootCmd.AddCommand(newConfigCmd(flags))
 	rootCmd.AddCommand(newStatusCmd(flags))
 	rootCmd.AddCommand(newPlayCmd(flags))
@@ -213,7 +229,7 @@ func completionTimeoutForFlags(flags *rootFlags) time.Duration {
 
 func validateTarget(flags *rootFlags) error {
 	if flags.IP == "" && flags.Name == "" {
-		return errors.New("provide --ip or --name (or run `sonos discover`)")
+		return newTargetRequiredError(flags)
 	}
 	return nil
 }
@@ -242,7 +258,9 @@ func resolveTargetCoordinatorIP(ctx context.Context, flags *rootFlags) (string, 
 		return "", err
 	}
 	if len(devs) == 0 {
-		return "", errors.New("no speakers found")
+		return "", newTargetNotFoundError("no speakers found", flags, map[string]any{
+			"resolution": "discover",
+		})
 	}
 
 	c := newSonosClient(devs[0].IP, flags.Timeout)
@@ -252,7 +270,10 @@ func resolveTargetCoordinatorIP(ctx context.Context, flags *rootFlags) (string, 
 	}
 	coordIP, ok := top.CoordinatorIPForName(flags.Name)
 	if !ok {
-		return "", errors.New("speaker name not found in topology: " + flags.Name)
+		return "", newTargetNotFoundError("speaker name not found in topology: "+flags.Name, flags, map[string]any{
+			"resolution": "topology",
+			"room":       strings.TrimSpace(flags.Name),
+		})
 	}
 	return coordIP, nil
 }

@@ -7,8 +7,7 @@
 
 这份文档正式化当前仓库里已经落地的“请求模型”。
 
-这里说的 request，不是一个全新的统一 `execute` JSON 入口，而是当前已经稳定存在于
-JSON 成功输出里的：
+这里说的 request，不是 `sonos execute` 的输入契约，而是当前已经稳定存在于 JSON 成功输出里的：
 
 - `execution.target`
 - `execution.request`
@@ -27,9 +26,15 @@ JSON 成功输出里的：
 
 ### v1 不覆盖什么
 
-1. 一个新的统一 CLI 入口，例如 `sonos execute`
+1. 一个已经完整 formalize 的统一 CLI 输入层
 2. 一个强制所有能力都使用同样嵌套结构的输入层
 3. 旧草案里 `source/action/strategy/state` 的完整实现
+
+说明：
+
+1. 仓库现在已经有最小 `sonos execute` PoC
+2. 但它仍是局部 capability 覆盖，不等于完整输入 schema 已冻结
+3. `execute` 输入说明请看 `docs/execute-entry-poc-v1-2026-03-19.md`
 
 旧草案仍然有参考价值，但本 v1 文档以当前代码现实为准。
 

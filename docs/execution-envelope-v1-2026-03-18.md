@@ -200,7 +200,7 @@ JSON 模式下，这三类命令会额外返回：
 
 这次只是第一步，还没有做：
 
-1. 一个统一的 `execute` 入口命令
+1. 一个覆盖全部 capability 的统一 `execute` 入口命令
 2. 一个正式的 request schema 输入层
 3. 所有命令都接入 envelope
 
@@ -231,6 +231,11 @@ JSON 模式下，这三类命令会额外返回：
    - `feedback`
 2. 再考虑是否增加一个统一 `execute` 入口
 
+说明：
+
+截至 2026-03-19 晚些时候，仓库已经新增一个最小 `sonos execute` PoC，
+但当前仍然只是部分 capability 覆盖，距离完整统一入口还有一段距离。
+
 ---
 
 ## 8) 配套正式文档
@@ -240,9 +245,11 @@ JSON 模式下，这三类命令会额外返回：
 1. `docs/schema-request-v1.md`
 2. `docs/schema-response-v1.md`
 3. `docs/schema-errors-v1.md`
+4. `docs/execute-entry-poc-v1-2026-03-19.md`
 
 说明：
 
 1. `request` 文档以当前已经落地的 `execution.target + execution.request` 为准
 2. `response` 文档明确区分了标准成功响应、JSON line 事件、以及 `doctor` 特例
 3. `errors` 文档冻结了当前真实存在的 `ERR_*` 错误码，而不是未来草案码表
+4. `execute` 文档描述的是最小统一入口 PoC，而不是完整输入 schema 终稿

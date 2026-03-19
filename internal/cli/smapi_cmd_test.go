@@ -344,7 +344,7 @@ func TestSMAPISearchCmd_OpenPlaysOnSonos(t *testing.T) {
 	if !strings.Contains(out, "\"result\"") || !strings.Contains(out, "spotify:track:abc") {
 		t.Fatalf("unexpected output: %q", out)
 	}
-	if !strings.Contains(out, "\"capability\": \"music.smapi\"") || !strings.Contains(out, "\"operation\": \"search\"") {
+	if !strings.Contains(out, "\"action\": \"smapi.search\"") || !strings.Contains(out, "\"capability\": \"music.smapi\"") || !strings.Contains(out, "\"operation\": \"search\"") {
 		t.Fatalf("missing execution envelope: %q", out)
 	}
 	if fs.playCalls.Load() == 0 {
@@ -409,6 +409,39 @@ func TestSMAPIBrowseCmd_JSONIncludesExecutionEnvelope(t *testing.T) {
 	}
 	if !strings.Contains(out, "\"action\": \"smapi.browse\"") || !strings.Contains(out, "\"capability\": \"music.smapi\"") {
 		t.Fatalf("unexpected json: %q", out)
+	}
+}
+
+func TestSMAPIBrowseCmd_OpenKeepsTopLevelAction(t *testing.T) {
+	fs := newFakeSonosSMAPIServer(t)
+	u, _ := url.Parse(fs.srv.URL)
+	port, _ := strconv.Atoi(u.Port())
+
+	oldNew := newSonosClient
+	oldStore := newSMAPITokenStore
+	t.Cleanup(func() {
+		newSonosClient = oldNew
+		newSMAPITokenStore = oldStore
+	})
+
+	store := &memTokenStore{}
+	_ = store.Save("2311", "Sonos_TEST", sonos.SMAPITokenPair{AuthToken: "t", PrivateKey: "k"})
+	newSMAPITokenStore = func() (sonos.SMAPITokenStore, error) { return store, nil }
+
+	newSonosClient = func(ip string, timeout time.Duration) *sonos.Client {
+		return &sonos.Client{IP: u.Hostname(), Port: port, HTTP: fs.srv.Client()}
+	}
+
+	flags := &rootFlags{IP: u.Hostname(), Timeout: 2 * time.Second, Format: formatJSON}
+	out, err := execute(t, newSMAPIBrowseCmd(flags), "--service", "Spotify", "--id", "root", "--open", "--index", "2")
+	if err != nil {
+		t.Fatalf("smapi browse --open: %v", err)
+	}
+	if !strings.Contains(out, "\"action\": \"smapi.browse\"") || !strings.Contains(out, "\"selectedTitle\": \"Gareth Emery\"") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+	if fs.playCalls.Load() == 0 {
+		t.Fatalf("expected Play to be called")
 	}
 }
 

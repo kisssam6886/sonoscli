@@ -595,7 +595,7 @@ func newSMAPISearchCmd(flags *rootFlags) *cobra.Command {
 						"query":     query,
 						"result":    res,
 						"selected":  selected,
-						"action": map[string]any{
+						"playbackAction": map[string]any{
 							"enqueue": true,
 							"playNow": doOpen,
 						},
@@ -752,7 +752,7 @@ func newSMAPIBrowseCmd(flags *rootFlags) *cobra.Command {
 						"service":   svc,
 						"browse":    res,
 						"selected":  selected,
-						"action": map[string]any{
+						"playbackAction": map[string]any{
 							"enqueue": true,
 							"playNow": doOpen,
 						},

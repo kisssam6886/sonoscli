@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -65,6 +66,12 @@ var executeActionAliases = map[string]executeActionAlias{
 	"queue.remove":          {Capability: "queue", Operation: "remove"},
 	"favorites.list":        {Capability: "favorites", Operation: "list"},
 	"favorites.open":        {Capability: "favorites", Operation: "open"},
+	"smapi.search":          {Capability: "music.smapi", Operation: "search"},
+	"smapi.browse":          {Capability: "music.smapi", Operation: "browse"},
+	"auth.smapi.begin":      {Capability: "auth.smapi", Operation: "begin"},
+	"auth.smapi.complete":   {Capability: "auth.smapi", Operation: "complete"},
+	"open":                  {Capability: "music.spotify", Operation: "open"},
+	"enqueue":               {Capability: "music.spotify", Operation: "enqueue"},
 	"group.status":          {Capability: "group", Operation: "status"},
 	"group.join":            {Capability: "group", Operation: "join"},
 	"group.unjoin":          {Capability: "group", Operation: "unjoin"},
@@ -199,6 +206,54 @@ func normalizeExecuteRequest(req *executeRequestPayload) error {
 	req.Capability = strings.ToLower(strings.TrimSpace(req.Capability))
 	req.Operation = strings.ToLower(strings.TrimSpace(req.Operation))
 
+	switch req.Action {
+	case "play.spotify":
+		if req.Capability == "" {
+			req.Capability = "music.spotify"
+		} else if req.Capability != "music.spotify" {
+			return newInvalidArgumentError("action conflicts with capability", map[string]any{
+				"action":      "execute",
+				"inputAction": req.Action,
+				"capability":  req.Capability,
+			})
+		}
+		if req.Operation == "" {
+			enqueueOnly, ok, err := executeBoolField(req.Request, "enqueueOnly")
+			if err != nil {
+				return err
+			}
+			if ok && enqueueOnly {
+				req.Operation = "enqueue"
+			} else {
+				req.Operation = "play"
+			}
+		}
+	case "search.spotify":
+		if req.Capability == "" {
+			req.Capability = "music.spotify"
+		} else if req.Capability != "music.spotify" {
+			return newInvalidArgumentError("action conflicts with capability", map[string]any{
+				"action":      "execute",
+				"inputAction": req.Action,
+				"capability":  req.Capability,
+			})
+		}
+		if req.Operation == "" {
+			selectionAction, _, err := executeStringField(req.Request, "selectionAction")
+			if err != nil {
+				return err
+			}
+			switch strings.ToLower(strings.TrimSpace(selectionAction)) {
+			case "open":
+				req.Operation = "search_open"
+			case "enqueue":
+				req.Operation = "search_enqueue"
+			default:
+				req.Operation = "search"
+			}
+		}
+	}
+
 	if alias, ok := executeActionAliases[req.Action]; ok {
 		if req.Capability == "" {
 			req.Capability = alias.Capability
@@ -301,8 +356,14 @@ func buildExecuteCommand(flags *rootFlags, req executeRequestPayload) (*cobra.Co
 		return buildExecuteGroupVolumeCommand(flags, req)
 	case "group.mute":
 		return buildExecuteGroupMuteCommand(flags, req)
+	case "auth.smapi":
+		return buildExecuteAuthSMAPICommand(flags, req)
 	case "music.netease":
 		return buildExecuteNCMCommand(flags, req)
+	case "music.smapi":
+		return buildExecuteSMAPICommand(flags, req)
+	case "music.spotify":
+		return buildExecuteSpotifyCommand(flags, req)
 	case "say":
 		return buildExecuteSayCommand(flags, req)
 	default:
@@ -512,6 +573,52 @@ func buildExecuteFavoritesCommand(flags *rootFlags, req executeRequestPayload) (
 	return newFavoritesCmd(flags), args, nil
 }
 
+func buildExecuteAuthSMAPICommand(flags *rootFlags, req executeRequestPayload) (*cobra.Command, []string, error) {
+	serviceName, ok, err := executeServiceNameField(req.Request)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	switch req.Operation {
+	case "begin":
+		args := []string{}
+		if ok && serviceName != "" {
+			args = append(args, "--service", serviceName)
+		}
+		return newSMAPIAuthBeginCmd(flags), args, nil
+	case "complete":
+		args := []string{}
+		if ok && serviceName != "" {
+			args = append(args, "--service", serviceName)
+		}
+		code, ok, err := executeStringField(req.Request, "code")
+		if err != nil {
+			return nil, nil, err
+		}
+		if !ok || code == "" {
+			return nil, nil, missingExecuteRequestField(req, "code")
+		}
+		args = append(args, "--code", code)
+		linkDeviceID, ok, err := executeStringField(req.Request, "linkDeviceID", "linkDeviceId", "linkDevice")
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok && linkDeviceID != "" {
+			args = append(args, "--link-device-id", linkDeviceID)
+		}
+		wait, ok, err := executeDurationField(req.Request, "wait")
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok {
+			args = append(args, "--wait", wait.String())
+		}
+		return newSMAPIAuthCompleteCmd(flags), args, nil
+	default:
+		return nil, nil, unsupportedExecuteOperation(req, "begin", "complete")
+	}
+}
+
 func buildExecuteGroupCommand(flags *rootFlags, req executeRequestPayload) (*cobra.Command, []string, error) {
 	args := []string{req.Operation}
 	switch req.Operation {
@@ -626,6 +733,283 @@ func buildExecuteNCMCommand(flags *rootFlags, req executeRequestPayload) (*cobra
 	}
 	args = append(args, query)
 	return newNCMCmd(flags), args, nil
+}
+
+func buildExecuteSMAPICommand(flags *rootFlags, req executeRequestPayload) (*cobra.Command, []string, error) {
+	serviceName, ok, err := executeServiceNameField(req.Request)
+	if err != nil {
+		return nil, nil, err
+	}
+	args := []string{}
+	if ok && serviceName != "" {
+		args = append(args, "--service", serviceName)
+	}
+
+	switch req.Operation {
+	case "search":
+		category, ok, err := executeStringField(req.Request, "category")
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok && category != "" {
+			args = append(args, "--category", category)
+		}
+		limit, ok, err := executeIntField(req.Request, "limit")
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok {
+			args = append(args, "--limit", strconv.Itoa(limit))
+		}
+		open, ok, err := executeBoolField(req.Request, "open")
+		if err != nil {
+			return nil, nil, err
+		}
+		enqueue, ok2, err := executeBoolField(req.Request, "enqueue")
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok && ok2 && open && enqueue {
+			return nil, nil, newInvalidArgumentError("use only one of request.open or request.enqueue", map[string]any{
+				"action":     "execute",
+				"capability": req.Capability,
+				"operation":  req.Operation,
+			})
+		}
+		if open {
+			args = append(args, "--open")
+		}
+		if enqueue {
+			args = append(args, "--enqueue")
+		}
+		index, ok, err := executeIntField(req.Request, "index")
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok {
+			args = append(args, "--index", strconv.Itoa(index))
+		}
+		query, ok, err := executeStringField(req.Request, "query")
+		if err != nil {
+			return nil, nil, err
+		}
+		if !ok || query == "" {
+			return nil, nil, missingExecuteRequestField(req, "query")
+		}
+		args = append(args, query)
+		return newSMAPISearchCmd(flags), args, nil
+	case "browse":
+		id, ok, err := executeStringField(req.Request, "id")
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok && id != "" {
+			args = append(args, "--id", id)
+		}
+		limit, ok, err := executeIntField(req.Request, "limit")
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok {
+			args = append(args, "--limit", strconv.Itoa(limit))
+		}
+		recursive, ok, err := executeBoolField(req.Request, "recursive")
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok && recursive {
+			args = append(args, "--recursive")
+		}
+		open, ok, err := executeBoolField(req.Request, "open")
+		if err != nil {
+			return nil, nil, err
+		}
+		enqueue, ok2, err := executeBoolField(req.Request, "enqueue")
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok && ok2 && open && enqueue {
+			return nil, nil, newInvalidArgumentError("use only one of request.open or request.enqueue", map[string]any{
+				"action":     "execute",
+				"capability": req.Capability,
+				"operation":  req.Operation,
+			})
+		}
+		if open {
+			args = append(args, "--open")
+		}
+		if enqueue {
+			args = append(args, "--enqueue")
+		}
+		index, ok, err := executeIntField(req.Request, "index")
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok {
+			args = append(args, "--index", strconv.Itoa(index))
+		}
+		return newSMAPIBrowseCmd(flags), args, nil
+	default:
+		return nil, nil, unsupportedExecuteOperation(req, "search", "browse")
+	}
+}
+
+func buildExecuteSpotifyCommand(flags *rootFlags, req executeRequestPayload) (*cobra.Command, []string, error) {
+	switch req.Operation {
+	case "open":
+		args := []string{}
+		title, ok, err := executeStringField(req.Request, "title", "titleOverride")
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok && title != "" {
+			args = append(args, "--title", title)
+		}
+		asNext, ok, err := executeBoolField(req.Request, "asNext", "next")
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok && asNext {
+			args = append(args, "--next")
+		}
+		ref, ok, err := executeStringField(req.Request, "ref", "uri")
+		if err != nil {
+			return nil, nil, err
+		}
+		if !ok || ref == "" {
+			return nil, nil, missingExecuteRequestField(req, "ref")
+		}
+		args = append(args, ref)
+		return newOpenCmd(flags), args, nil
+	case "enqueue":
+		if _, ok, _ := executeStringField(req.Request, "ref", "uri"); ok {
+			args := []string{}
+			title, ok, err := executeStringField(req.Request, "title", "titleOverride")
+			if err != nil {
+				return nil, nil, err
+			}
+			if ok && title != "" {
+				args = append(args, "--title", title)
+			}
+			asNext, ok, err := executeBoolField(req.Request, "asNext", "next")
+			if err != nil {
+				return nil, nil, err
+			}
+			if ok && asNext {
+				args = append(args, "--next")
+			}
+			ref, _, err := executeStringField(req.Request, "ref", "uri")
+			if err != nil {
+				return nil, nil, err
+			}
+			args = append(args, ref)
+			return newEnqueueCmd(flags), args, nil
+		}
+		fallthrough
+	case "play":
+		args := []string{}
+		serviceName, ok, err := executeServiceNameField(req.Request)
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok && serviceName != "" {
+			args = append(args, "--service", serviceName)
+		}
+		category, ok, err := executeStringField(req.Request, "category")
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok && category != "" {
+			args = append(args, "--category", category)
+		}
+		index, ok, err := executeIntField(req.Request, "index")
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok {
+			args = append(args, "--index", strconv.Itoa(index))
+		}
+		title, ok, err := executeStringField(req.Request, "title", "titleOverride")
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok && title != "" {
+			args = append(args, "--title", title)
+		}
+		if req.Operation == "enqueue" {
+			args = append(args, "--enqueue")
+		}
+		query, ok, err := executeStringField(req.Request, "query")
+		if err != nil {
+			return nil, nil, err
+		}
+		if !ok || query == "" {
+			return nil, nil, missingExecuteRequestField(req, "query")
+		}
+		args = append(args, query)
+		return newPlaySpotifyCmd(flags), args, nil
+	case "search", "search_open", "search_enqueue":
+		args := []string{}
+		searchType, ok, err := executeStringField(req.Request, "type")
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok && searchType != "" {
+			args = append(args, "--type", searchType)
+		}
+		limit, ok, err := executeIntField(req.Request, "limit")
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok {
+			args = append(args, "--limit", strconv.Itoa(limit))
+		}
+		market, ok, err := executeStringField(req.Request, "market")
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok && market != "" {
+			args = append(args, "--market", market)
+		}
+		clientID, ok, err := executeStringField(req.Request, "clientID", "clientId")
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok && clientID != "" {
+			args = append(args, "--client-id", clientID)
+		}
+		clientSecret, ok, err := executeStringField(req.Request, "clientSecret")
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok && clientSecret != "" {
+			args = append(args, "--client-secret", clientSecret)
+		}
+		index, ok, err := executeIntField(req.Request, "index")
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok {
+			args = append(args, "--index", strconv.Itoa(index))
+		}
+		switch req.Operation {
+		case "search_open":
+			args = append(args, "--open")
+		case "search_enqueue":
+			args = append(args, "--enqueue")
+		}
+		query, ok, err := executeStringField(req.Request, "query")
+		if err != nil {
+			return nil, nil, err
+		}
+		if !ok || query == "" {
+			return nil, nil, missingExecuteRequestField(req, "query")
+		}
+		args = append(args, query)
+		return newSearchSpotifyCmd(flags), args, nil
+	default:
+		return nil, nil, unsupportedExecuteOperation(req, "open", "enqueue", "play", "search", "search_open", "search_enqueue")
+	}
 }
 
 func buildExecuteSayCommand(flags *rootFlags, req executeRequestPayload) (*cobra.Command, []string, error) {
@@ -752,6 +1136,49 @@ func executeStringField(fields map[string]any, keys ...string) (string, bool, er
 	return "", false, nil
 }
 
+func executeDurationField(fields map[string]any, keys ...string) (time.Duration, bool, error) {
+	for _, key := range keys {
+		value, ok := fields[key]
+		if !ok || value == nil {
+			continue
+		}
+		switch v := value.(type) {
+		case string:
+			d, err := time.ParseDuration(strings.TrimSpace(v))
+			if err != nil {
+				return 0, false, newInvalidArgumentError("request."+key+" must be a duration string", map[string]any{
+					"action": "execute",
+					"field":  key,
+					"cause":  err.Error(),
+				})
+			}
+			return d, true, nil
+		case int:
+			return time.Duration(v) * time.Second, true, nil
+		case int64:
+			return time.Duration(v) * time.Second, true, nil
+		case float64:
+			return time.Duration(v * float64(time.Second)), true, nil
+		case json.Number:
+			n, err := v.Int64()
+			if err != nil {
+				return 0, false, newInvalidArgumentError("request."+key+" must be a duration string", map[string]any{
+					"action": "execute",
+					"field":  key,
+					"cause":  err.Error(),
+				})
+			}
+			return time.Duration(n) * time.Second, true, nil
+		default:
+			return 0, false, newInvalidArgumentError("request."+key+" must be a duration string", map[string]any{
+				"action": "execute",
+				"field":  key,
+			})
+		}
+	}
+	return 0, false, nil
+}
+
 func executeIntField(fields map[string]any, keys ...string) (int, bool, error) {
 	for _, key := range keys {
 		value, ok := fields[key]
@@ -853,6 +1280,34 @@ func executeMemberRefField(fields map[string]any, key string) (string, bool, err
 			"field":  key,
 		})
 	}
+}
+
+func executeServiceNameField(fields map[string]any) (string, bool, error) {
+	value, ok := fields["service"]
+	if ok && value != nil {
+		switch v := value.(type) {
+		case string:
+			return strings.TrimSpace(v), true, nil
+		case map[string]any:
+			name, ok, err := executeStringField(v, "name")
+			if err != nil {
+				return "", false, err
+			}
+			if !ok || name == "" {
+				return "", false, newInvalidArgumentError("request.service must include name", map[string]any{
+					"action": "execute",
+					"field":  "service",
+				})
+			}
+			return name, true, nil
+		default:
+			return "", false, newInvalidArgumentError("request.service must be a string or object", map[string]any{
+				"action": "execute",
+				"field":  "service",
+			})
+		}
+	}
+	return executeStringField(fields, "serviceName")
 }
 
 func missingExecuteRequestField(req executeRequestPayload, field string) error {

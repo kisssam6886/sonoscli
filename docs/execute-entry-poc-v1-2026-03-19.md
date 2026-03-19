@@ -44,6 +44,18 @@
 | `target` | object | 可选目标 |
 | `request` | object | 可选业务参数 |
 
+### 输入兼容约定
+
+为了让 agent 更容易拼请求，这一版 `execute` 额外接受两类宽松输入：
+
+1. `request.service`
+   - 可以直接传字符串，例如 `"Spotify"`
+   - 也可以传对象，例如 `{ "name": "Spotify" }`
+
+2. `request.wait`
+   - 目前用于 `auth.smapi.complete`
+   - 推荐传 duration string，例如 `"30s"`、`"500ms"`
+
 ### `target`
 
 当前支持这些字段：
@@ -145,8 +157,18 @@ cat request.json | sonos execute --format json --file -
 
 ### Music
 
+- `auth.smapi/begin`
+- `auth.smapi/complete`
 - `music.netease/play`
 - `music.netease/lucky`
+- `music.smapi/search`
+- `music.smapi/browse`
+- `music.spotify/open`
+- `music.spotify/enqueue`
+- `music.spotify/play`
+- `music.spotify/search`
+- `music.spotify/search_open`
+- `music.spotify/search_enqueue`
 
 ### Voice
 
@@ -173,6 +195,14 @@ cat request.json | sonos execute --format json --file -
 | `play-uri` | `transport.source/play-uri` |
 | `queue.play` | `queue/play` |
 | `favorites.open` | `favorites/open` |
+| `smapi.search` | `music.smapi/search` |
+| `smapi.browse` | `music.smapi/browse` |
+| `auth.smapi.begin` | `auth.smapi/begin` |
+| `auth.smapi.complete` | `auth.smapi/complete` |
+| `open` | `music.spotify/open` |
+| `enqueue` | `music.spotify/enqueue` |
+| `play.spotify` | `music.spotify/play` 或 `music.spotify/enqueue` |
+| `search.spotify` | `music.spotify/search` / `search_open` / `search_enqueue` |
 | `group.party` | `group/party` |
 | `group.mute.off` | `group.mute/set` |
 | `ncm.play` | `music.netease/play` |
@@ -182,7 +212,9 @@ cat request.json | sonos execute --format json --file -
 
 1. alias 只覆盖当前 PoC 已支持的动作
 2. 如果 alias 自带默认 request，例如 `mode.repeat-one`，会自动补到 `request.mode`
-3. 如果 `action` 与显式 `capability/operation` 冲突，会报 `ERR_INVALID_ARGUMENT`
+3. `play.spotify` 会根据 `request.enqueueOnly` 自动推断成 `play` 或 `enqueue`
+4. `search.spotify` 会根据 `request.selectionAction` 自动推断成 `search` / `search_open` / `search_enqueue`
+5. 如果 `action` 与显式 `capability/operation` 冲突，会报 `ERR_INVALID_ARGUMENT`
 
 ---
 
@@ -250,6 +282,40 @@ cat request.json | sonos execute --format json --file -
 }
 ```
 
+### 5. 发起 SMAPI 设备授权
+
+```json
+{
+  "action": "auth.smapi.begin",
+  "target": {
+    "ip": "192.168.1.20"
+  },
+  "request": {
+    "service": {
+      "name": "Spotify"
+    }
+  }
+}
+```
+
+### 6. 用 execute 触发 SMAPI 搜索并直接打开
+
+```json
+{
+  "action": "smapi.search",
+  "target": {
+    "room": "客厅"
+  },
+  "request": {
+    "service": "Spotify",
+    "category": "tracks",
+    "query": "gareth",
+    "open": true,
+    "index": 1
+  }
+}
+```
+
 ---
 
 ## 返回结构
@@ -284,9 +350,8 @@ cat request.json | sonos execute --format json --file -
    - `scene`
    - `schedule`
    - `config`
-   - `auth.smapi`
-   - `music.smapi`
-   - `music.spotify`
+   - `watch`
+   - 更高层 workflow / snapshot / restore / undo
 
 ---
 
